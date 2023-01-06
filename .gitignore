@@ -19,3 +19,4 @@ vpi_wrapper_*
 */vcd
 *.vcd
 .DS_Store
+*.elf*
