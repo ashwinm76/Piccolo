@@ -16,3 +16,6 @@ log_*.txt
 AA_*
 symbol_table.txt
 vpi_wrapper_*
+*/vcd
+*.vcd
+.DS_Store

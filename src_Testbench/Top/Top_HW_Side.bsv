@@ -1,4 +1,6 @@
 // Copyright (c) 2013-2020 Bluespec, Inc. All Rights Reserved.
+// Copyright (c) 2022 Ashwin Menon. All Rights Reserved
+// Modified to make it the rv_system0 design.
 
 package Top_HW_Side;
 
@@ -12,6 +14,8 @@ package Top_HW_Side;
 import GetPut       :: *;
 import ClientServer :: *;
 import Connectable  :: *;
+import StmtFSM      :: *;
+import List         :: *;
 
 // ----------------
 // BSV additional libs
@@ -27,6 +31,7 @@ import TV_Info        :: *;
 import SoC_Top        :: *;
 import Mem_Controller :: *;
 import Mem_Model      :: *;
+import Uart_TB_Model  :: *;
 import Fabric_Defs    :: *;
 import PLIC           :: *;
 
@@ -41,72 +46,85 @@ import External_Control :: *;
 (* synthesize *)
 module mkTop_HW_Side (Empty) ;
 
-   SoC_Top_IFC    soc_top   <- mkSoC_Top;
-   Mem_Model_IFC  mem_model <- mkMem_Model;
+  SoC_Top_IFC    soc_top   <- mkSoC_Top;
+  Mem_Model_IFC  mem_model <- mkMem_Model;
+  UartCon_IFC uart <- mkUartCon;
 
-   // Connect SoC to raw memory
-   let memCnx <- mkConnection (soc_top.to_raw_mem, mem_model.mem_server);
+  // Connect SoC to raw memory
+  let memCnx <- mkConnection (soc_top.to_raw_mem, mem_model.mem_server);
 
-   // ================================================================
-   // BEHAVIOR
+  // ================================================================
+  // BEHAVIOR
 
-   Reg #(Bool) rg_banner_printed <- mkReg (False);
+  Reg #(Bool) rg_banner_printed <- mkReg (False);
+  Reg #(Bit#(64)) gpio_o <- mkRegU;
 
-   // Display a banner
-   rule rl_step0 (! rg_banner_printed);
-      $display ("================================================================");
-      $display ("Bluespec RISC-V standalone system simulation v1.2");
-      $display ("Copyright (c) 2017-2019 Bluespec, Inc. All Rights Reserved.");
-      $display ("================================================================");
+  rule rl_gpio;
+    soc_top.gpio_input(0);
+    if (soc_top.gpio_output != gpio_o) begin
+      gpio_o <= soc_top.gpio_output;
+      $display("%0d: GPIO Output: %h", cur_cycle, soc_top.gpio_output);
+    end
+  endrule
 
-      rg_banner_printed <= True;
+  // Display a banner
+  rule rl_step0 (! rg_banner_printed);
+    $display ("================================================================");
+    $display ("Bluespec RISC-V standalone system simulation v1.2");
+    $display ("Copyright (c) 2017-2019 Bluespec, Inc. All Rights Reserved.");
+    $display ("================================================================");
 
-      // Set CPU verbosity and logdelay (simulation only)
-      Bool v1 <- $test$plusargs ("v1");
-      Bool v2 <- $test$plusargs ("v2");
-      Bit #(4)  verbosity = ((v2 ? 2 : (v1 ? 1 : 0)));
-      Bit #(64) logdelay  = 0;    // # of instructions after which to set verbosity
-      soc_top.set_verbosity  (verbosity, logdelay);
+    rg_banner_printed <= True;
 
-      // ----------------
-      // Load tohost addr from symbol-table file
-      Bool watch_tohost <- $test$plusargs ("tohost");
-      let tha <- c_get_symbol_val ("tohost");
-      Fabric_Addr tohost_addr = truncate (tha);
-      $display ("INFO: watch_tohost = %0d, tohost_addr = 0x%0h",
-		pack (watch_tohost), tohost_addr);
-      soc_top.set_watch_tohost (watch_tohost, tohost_addr);
+    // Set CPU verbosity and logdelay (simulation only)
+    Bool v1 <- $test$plusargs ("v1");
+    Bool v2 <- $test$plusargs ("v2");
+    Bit #(4)  verbosity = ((v2 ? 2 : (v1 ? 1 : 0)));
+    Bit #(64) logdelay  = 0;    // # of instructions after which to set verbosity
+    soc_top.set_verbosity  (verbosity, logdelay);
 
-      // ----------------
-      // Start timing the simulation
-      Bit #(32) cycle_num <- cur_cycle;
-      c_start_timing (zeroExtend (cycle_num));
+    // ----------------
+    // Load tohost addr from symbol-table file
+    Bool watch_tohost <- $test$plusargs ("tohost");
+    let tha <- c_get_symbol_val ("tohost");
+    Fabric_Addr tohost_addr = truncate (tha);
+    $display ("INFO: watch_tohost = %0d, tohost_addr = 0x%0h",
+        pack (watch_tohost), tohost_addr);
+    soc_top.set_watch_tohost (watch_tohost, tohost_addr);
 
-      // ----------------
-      // Open file for Tandem Verification trace output
+    // Set up the UART console model
+    uart.setup(100000000, 57600, PAR_EVEN, FLOW_CTS_RTS);
+
+    // ----------------
+    // Start timing the simulation
+    Bit #(32) cycle_num <- cur_cycle;
+    c_start_timing (zeroExtend (cycle_num));
+
+    // ----------------
+    // Open file for Tandem Verification trace output
 `ifdef INCLUDE_TANDEM_VERIF
-      let success <- c_trace_file_open ('h_AA);
-      if (success == 0) begin
-	 $display ("ERROR: Top_HW_Side.rl_step0: error opening trace file.");
-	 $display ("    Aborting.");
-	 $finish (1);
-      end
-      else
-	 $display ("Top_HW_Side.rl_step0: opened trace file.");
+    let success <- c_trace_file_open ('h_AA);
+    if (success == 0) begin
+      $display ("ERROR: Top_HW_Side.rl_step0: error opening trace file.");
+      $display ("    Aborting.");
+      $finish (1);
+    end
+    else
+      $display ("Top_HW_Side.rl_step0: opened trace file.");
 `endif
 
-      // ----------------
-      // Open connection to remote debug client
+    // ----------------
+    // Open connection to remote debug client
 `ifdef INCLUDE_GDB_CONTROL
-      let dmi_status <- c_debug_client_connect (dmi_default_tcp_port);
-      if (dmi_status != dmi_status_ok) begin
-	 $display ("ERROR: Top_HW_Side.rl_step0: error opening debug client connection.");
-	 $display ("    Aborting.");
-	 $finish (1);
-      end
+    let dmi_status <- c_debug_client_connect (dmi_default_tcp_port);
+    if (dmi_status != dmi_status_ok) begin
+      $display ("ERROR: Top_HW_Side.rl_step0: error opening debug client connection.");
+      $display ("    Aborting.");
+      $finish (1);
+    end
 `endif
 
-   endrule: rl_step0
+  endrule: rl_step0
 
    // ================================================================
    // Terminate on any non-zero status
@@ -152,36 +170,32 @@ module mkTop_HW_Side (Empty) ;
    endrule
 `endif
 
-   // ================================================================
-   // UART console I/O
+  rule rl_uart_connections;
+    soc_top.cts_i(uart.rts_o);
+    soc_top.rxd_i(uart.txd_o);
+    uart.m_cts_i(soc_top.rts_o);
+    uart.m_rxd_i(soc_top.txd_o);
+  endrule
 
-   // Relay system console output to terminal
+  // Poll terminal input and relay any chars into system console input.
+  // Note: rg_console_in_poll is used to poll only every N cycles, whenever it wraps around to 0.
 
-   rule rl_relay_console_out;
-      let ch <- soc_top.get_to_console.get;
-      $write ("%c", ch);
-      $fflush (stdout);
-   endrule
+  Reg #(Bit #(12)) rg_console_in_poll <- mkReg (0);
 
-   // Poll terminal input and relay any chars into system console input.
-   // Note: rg_console_in_poll is used to poll only every N cycles, whenever it wraps around to 0.
-
-   Reg #(Bit #(12)) rg_console_in_poll <- mkReg (0);
-
-   rule rl_relay_console_in;
-      if (rg_console_in_poll == 0) begin
-	 Bit #(8) ch <- c_trygetchar (?);
-	 if (ch != 0) begin
-	    soc_top.put_from_console.put (ch);
-	    /*
-	    $write ("%0d: Top_HW_Side.bsv.rl_relay_console: ch = 0x%0h", cur_cycle, ch);
-	    if (ch >= 'h20) $write (" ('%c')", ch);
-	    $display ("");
-	    */
-	 end
-      end
-      rg_console_in_poll <= rg_console_in_poll + 1;
-   endrule
+  rule rl_relay_console_in;
+    if (rg_console_in_poll == 0) begin
+	    Bit #(8) ch <- c_trygetchar (?);
+	    if (ch != 0) begin
+	      uart.send(ch);
+	      /*
+	      $write ("%0d: Top_HW_Side.bsv.rl_relay_console: ch = 0x%0h", cur_cycle, ch);
+	      if (ch >= 'h20) $write (" ('%c')", ch);
+	      $display ("");
+	      */
+	    end
+    end
+    rg_console_in_poll <= rg_console_in_poll + 1;
+  endrule
 
    // ================================================================
    // Interaction with remote debug client

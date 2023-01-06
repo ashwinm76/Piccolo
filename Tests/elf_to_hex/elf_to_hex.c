@@ -1,4 +1,6 @@
 // Copyright (c) 2013-2018 Bluespec, Inc. All Rights Reserved
+// Copyright (c) 2022 Ashwin Menon. All Rights Reserved
+// Fixed bugs.
 
 // This program reads an ELF file and outputs a Verilog hex memory
 // image file (suitable for reading using $readmemh).
@@ -22,7 +24,7 @@
 // #define MAX_MEM_SIZE (((uint64_t) 0x400) * ((uint64_t) 0x400) * ((uint64_t) 0x400))
 #define MAX_MEM_SIZE ((uint64_t) 0x90000000)
 
-uint8_t mem_buf [MAX_MEM_SIZE];
+uint8_t *mem_buf;
 
 // Features of the ELF binary
 int       bitwidth;
@@ -312,6 +314,12 @@ void print_usage (FILE *fp, int argc, char *argv [])
 
 int main (int argc, char *argv [])
 {
+    mem_buf = (uint8_t*)malloc(MAX_MEM_SIZE * sizeof(uint64_t));
+    if (mem_buf == NULL) {
+      printf("Out of memory\n");
+      return 0;
+    }
+
     if ((argc == 2) && (strcmp (argv [1], "--help") == 0)) {
 	print_usage (stdout, argc, argv);
 	return 0;

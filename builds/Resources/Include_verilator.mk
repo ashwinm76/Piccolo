@@ -34,11 +34,11 @@ SIM_EXE_FILE = exe_HW_sim
 #    --x-initial fast   Optimize uninitialized value
 #    --noassert         Disable all assertions
 
-VERILATOR_FLAGS = --stats -O3 -CFLAGS -O3 -LDFLAGS -static --x-assign fast --x-initial fast --noassert
+VERILATOR_FLAGS = #--stats -O3 -CFLAGS -O3 -LDFLAGS -static --x-assign fast --x-initial fast --noassert
 
 # Verilator flags: use the following to include code to generate VCDs
 # Select trace-depth according to your module hierarchy
-# VERILATOR_FLAGS += --trace  --trace-depth 2  -CFLAGS -DVM_TRACE
+VERILATOR_FLAGS += --trace  --trace-depth 99  -CFLAGS -DVM_TRACE=1 --timescale 1ns/1ns
 
 VTOP                = V$(TOPMODULE)_edited
 VERILATOR_RESOURCES = $(REPO)/builds/Resources/Verilator_resources

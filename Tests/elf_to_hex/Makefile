@@ -2,9 +2,10 @@
 # The executable creates mem-hex files containing 32-Byte words
 
 CC = gcc
+CFLAGS ?= 
 
 elf_to_hex: elf_to_hex.c
-	gcc -g  -o elf_to_hex  elf_to_hex.c  -lelf
+	gcc $(CFLAGS) -g  -o elf_to_hex  elf_to_hex.c  -lelf
 
 # ================================================================
 

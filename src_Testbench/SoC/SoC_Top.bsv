@@ -1,4 +1,6 @@
 // Copyright (c) 2016-2019 Bluespec, Inc. All Rights Reserved.
+// Copyright (c) 2022 Ashwin Menon. All Rights Reserved
+// Modified to make it the rv_system0 design.
 
 package SoC_Top;
 
@@ -52,7 +54,8 @@ import PLIC     :: *;    // For interface to PLIC interrupt sources, in Core_IFC
 
 import Boot_ROM       :: *;
 import Mem_Controller :: *;
-import UART_Model     :: *;
+import UART_Neorv32_Model     :: *;
+import GPIO_Model     :: *;
 
 `ifdef INCLUDE_CAMERA_MODEL
 import Camera_Model   :: *;
@@ -92,9 +95,25 @@ interface SoC_Top_IFC;
    // External real memory
    interface MemoryClient #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  to_raw_mem;
 
-   // UART0 to external console
-   interface Get #(Bit #(8)) get_to_console;
-   interface Put #(Bit #(8)) put_from_console;
+   // GPIO Inputs
+   (* always_ready, always_enabled, prefix = "" *)
+   method Action gpio_input ((* port="gpio_i" *) Bit#(64) inputs); // in
+
+   // GPIO Outputs
+   (* always_ready, result="gpio_o" *)
+   method Bit#(64) gpio_output; // out
+
+   // UART Inputs
+   (* always_ready, always_enabled, prefix = "" *)
+   method Action cts_i((* port="cts_i" *) Bit#(1) cts_i); // in
+   (* always_ready, always_enabled, prefix = "" *)
+   method Action rxd_i((* port="rxd_i" *) Bit#(1) rxd_i); // in
+
+   // UART Outputs
+   (* always_ready, result="txd_o" *)
+   method Bit#(1) txd_o; // out
+   (* always_ready, result="rts_o" *)
+   method Bit#(1) rts_o; // out
 
    // Catch-all status; return-value can identify the origin (0 = none)
    (* always_ready *)
@@ -150,7 +169,8 @@ module mkSoC_Top (SoC_Top_IFC);
 			Wd_User)  mem0_controller_axi4_deburster <- mkAXI4_Deburster_A;
 
    // SoC IPs
-   UART_IFC   uart0  <- mkUART;
+   UARTNeorv32_IFC#(4, 4) uart0 <- mkUARTNeorv32_4_4;
+   GPIO_IFC   gpio0  <- mkGPIO;
 
 `ifdef INCLUDE_ACCEL0
    // Accel0 master to fabric
@@ -186,6 +206,9 @@ module mkSoC_Top (SoC_Top_IFC);
 
    // Fabric to UART0
    mkConnection (fabric.v_to_slaves [uart0_slave_num],  uart0.slave);
+
+   // Fabric to GPIO0
+   mkConnection (fabric.v_to_slaves [gpio0_slave_num],  gpio0.slave);
 
 `ifdef INCLUDE_ACCEL0
    // Fabric to accel0
@@ -255,6 +278,7 @@ module mkSoC_Top (SoC_Top_IFC);
 	 core.cpu_reset_server.request.put (running);
 	 mem0_controller.server_reset.request.put (?);
 	 uart0.server_reset.request.put (?);
+   gpio0.server_reset.request.put (?);
 	 fabric.reset;
       endaction
    endfunction
@@ -264,6 +288,7 @@ module mkSoC_Top (SoC_Top_IFC);
 	 let cpu_rsp             <- core.cpu_reset_server.response.get;
 	 let mem0_controller_rsp <- mem0_controller.server_reset.response.get;
 	 let uart0_rsp           <- uart0.server_reset.response.get;
+   let gpio0_rsp           <- gpio0.server_reset.response.get;
 
 	 // Initialize address maps of slave IPs
 	 boot_rom.set_addr_map (soc_map.m_boot_rom_addr_base,
@@ -273,6 +298,7 @@ module mkSoC_Top (SoC_Top_IFC);
 				       soc_map.m_mem0_controller_addr_lim);
 
 	 uart0.set_addr_map (soc_map.m_uart0_addr_base, soc_map.m_uart0_addr_lim);
+   gpio0.set_addr_map (soc_map.m_gpio0_addr_base, soc_map.m_gpio0_addr_lim);
 
 `ifdef INCLUDE_ACCEL0
 	 accel0.init (fabric_default_id,
@@ -291,6 +317,9 @@ module mkSoC_Top (SoC_Top_IFC);
 	    $display ("  UART0:           0x%0h .. 0x%0h",
 		      soc_map.m_uart0_addr_base,
 		      soc_map.m_uart0_addr_lim);
+      $display ("  GPIO0:           0x%0h .. 0x%0h",
+		      soc_map.m_gpio0_addr_base,
+		      soc_map.m_gpio0_addr_lim);
 	 end
       endaction
    endfunction
@@ -415,9 +444,15 @@ module mkSoC_Top (SoC_Top_IFC);
    // External real memory
    interface to_raw_mem = mem0_controller.to_raw_mem;
 
-   // UART to external console
-   interface get_to_console   = uart0.get_to_console;
-   interface put_from_console = uart0.put_from_console;
+   // GPIO
+   interface gpio_input = gpio0.m_gpio_inputs;
+   interface gpio_output = gpio0.gpio_outputs;
+
+   // UART
+   interface cts_i = uart0.m_cts_i;
+   interface rxd_i = uart0.m_rxd_i;
+   interface txd_o = uart0.txd_o;
+   interface rts_o = uart0.rts_o;
 
    // Catch-all status; return-value can identify the origin (0 = none)
    method Bit #(8) status;
@@ -440,6 +475,12 @@ module mkAXI4_Deburster_A (AXI4_Deburster_IFC #(Wd_Id,
 						Wd_User));
    let m <- mkAXI4_Deburster;
    return m;
+endmodule
+
+(* synthesize *)
+module mkUARTNeorv32_4_4(UARTNeorv32_IFC#(4, 4));
+  UARTNeorv32_IFC#(4, 4) m <- mkUARTNeorv32;
+  return m;
 endmodule
 
 // ================================================================

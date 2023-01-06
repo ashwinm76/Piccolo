@@ -1,4 +1,6 @@
 // Copyright (c) 2013-2019 Bluespec, Inc. All Rights Reserved
+// Copyright (c) 2022 Ashwin Menon. All Rights Reserved
+// Modified to make it the rv_system0 design.
 
 package SoC_Map;
 
@@ -35,6 +37,7 @@ export  Num_Slaves;
 export  boot_rom_slave_num;
 export  mem0_controller_slave_num;
 export  uart0_slave_num;
+export  gpio0_slave_num;
 export  accel0_slave_num;
 
 export  N_External_Interrupt_Sources;
@@ -67,6 +70,10 @@ interface SoC_Map_IFC;
    (* always_ready *)   method  Fabric_Addr  m_uart0_addr_base;
    (* always_ready *)   method  Fabric_Addr  m_uart0_addr_size;
    (* always_ready *)   method  Fabric_Addr  m_uart0_addr_lim;
+
+   (* always_ready *)   method  Fabric_Addr  m_gpio0_addr_base;
+   (* always_ready *)   method  Fabric_Addr  m_gpio0_addr_size;
+   (* always_ready *)   method  Fabric_Addr  m_gpio0_addr_lim;
 
 `ifdef INCLUDE_ACCEL0
    (* always_ready *)   method  Fabric_Addr  m_accel0_addr_base;
@@ -138,6 +145,17 @@ module mkSoC_Map (SoC_Map_IFC);
 
    function Bool fn_is_uart0_addr (Fabric_Addr addr);
       return ((uart0_addr_base <= addr) && (addr < uart0_addr_lim));
+   endfunction
+
+   // ----------------------------------------------------------------
+   // GPIO 0
+
+   Fabric_Addr gpio0_addr_base = 'hC000_1000;
+   Fabric_Addr gpio0_addr_size = 'h0000_0080;    // 128
+   Fabric_Addr gpio0_addr_lim  = gpio0_addr_base + gpio0_addr_size;
+
+   function Bool fn_is_gpio0_addr (Fabric_Addr addr);
+      return ((gpio0_addr_base <= addr) && (addr < gpio0_addr_lim));
    endfunction
 
    // ----------------------------------------------------------------
@@ -218,6 +236,7 @@ module mkSoC_Map (SoC_Map_IFC);
       return (   fn_is_near_mem_io_addr (addr)
 	      || fn_is_plic_addr (addr)
 	      || fn_is_uart0_addr  (addr)
+             || fn_is_gpio0_addr  (addr)
 `ifdef INCLUDE_ACCEL0
 	      || fn_is_accel0_addr  (addr)
 `endif
@@ -247,6 +266,10 @@ module mkSoC_Map (SoC_Map_IFC);
    method  Fabric_Addr  m_uart0_addr_base = uart0_addr_base;
    method  Fabric_Addr  m_uart0_addr_size = uart0_addr_size;
    method  Fabric_Addr  m_uart0_addr_lim  = uart0_addr_lim;
+
+   method  Fabric_Addr  m_gpio0_addr_base = gpio0_addr_base;
+   method  Fabric_Addr  m_gpio0_addr_size = gpio0_addr_size;
+   method  Fabric_Addr  m_gpio0_addr_lim  = gpio0_addr_lim;
 
 `ifdef INCLUDE_ACCEL0
    method  Fabric_Addr  m_accel0_addr_base = accel0_addr_base;
@@ -301,11 +324,11 @@ typedef 2 Num_Masters;
 
 `ifdef INCLUDE_ACCEL0
 
-typedef 4 Num_Slaves;
+typedef 5 Num_Slaves;
 
 `else
 
-typedef 3 Num_Slaves;
+typedef 4 Num_Slaves;
 
 `endif
 
@@ -313,7 +336,8 @@ typedef 3 Num_Slaves;
 Integer boot_rom_slave_num        = 0;
 Integer mem0_controller_slave_num = 1;
 Integer uart0_slave_num           = 2;
-Integer accel0_slave_num          = 3;
+Integer gpio0_slave_num           = 3;
+Integer accel0_slave_num          = 4;
 
 // ================================================================
 // Interrupt request numbers (== index in to vector of

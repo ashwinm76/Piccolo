@@ -1,4 +1,6 @@
 // Copyright (c) 2013-2019 Bluespec, Inc. All Rights Reserved
+// Copyright (c) 2022 Ashwin Menon. All Rights Reserved
+// Modified to make it the rv_system0 design.
 
 package SoC_Fabric;
 
@@ -61,6 +63,11 @@ module mkFabric_AXI4 (Fabric_AXI4_IFC);
       else if (   (soc_map.m_uart0_addr_base <= addr)
 	       && (addr < soc_map.m_uart0_addr_lim))
 	 return tuple2 (True, fromInteger (uart0_slave_num));
+
+      // GPIO
+      else if (   (soc_map.m_gpio0_addr_base <= addr)
+	       && (addr < soc_map.m_gpio0_addr_lim))
+	 return tuple2 (True, fromInteger (gpio0_slave_num));
 
 `ifdef HTIF_MEMORY
       else if (   (soc_map.m_htif_addr_base <= addr)
