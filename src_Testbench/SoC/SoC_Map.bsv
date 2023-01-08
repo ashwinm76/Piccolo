@@ -185,8 +185,8 @@ module mkSoC_Map (SoC_Map_IFC);
    // ----------------------------------------------------------------
    // Main Mem Controller 0
 
-   Fabric_Addr mem0_controller_addr_base = 'h_8000_0000;
-   Fabric_Addr mem0_controller_addr_size = 'h_1000_0000;    // 256 MB
+   Fabric_Addr mem0_controller_addr_base = `RAM_BASE;
+   Fabric_Addr mem0_controller_addr_size = `RAM_SIZE;
    Fabric_Addr mem0_controller_addr_lim  = mem0_controller_addr_base + mem0_controller_addr_size;
 
    function Bool fn_is_mem0_controller_addr (Fabric_Addr addr);

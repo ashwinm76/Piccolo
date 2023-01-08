@@ -5,7 +5,8 @@ build_dir
 *.ba
 *.o
 obj_dir
-elf_to_hex
+**/elf_to_hex/**
+!elf_to_hex.cc
 Mem.hex
 exe*
 *.log
@@ -20,3 +21,4 @@ vpi_wrapper_*
 *.vcd
 .DS_Store
 *.elf*
+*.out

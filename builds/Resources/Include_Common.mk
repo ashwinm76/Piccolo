@@ -47,6 +47,18 @@ TOPFILE   ?= $(REPO)/src_Testbench/Top/Top_HW_Side.bsv
 TOPMODULE ?= mkTop_HW_Side
 
 # ================================================================
+# User parameters
+PRELOAD_RAM ?= 1
+RAM_BASE ?= "'h8000_0000"
+RAM_SIZE ?= "'h1000_0000"
+
+ifeq ($(PRELOAD_RAM), 1)
+  BSC_COMPILATION_FLAGS += -D PRELOAD_RAM
+endif
+
+BSC_COMPILATION_FLAGS += -D RAM_BASE=$(RAM_BASE) -D RAM_SIZE=$(RAM_SIZE)
+
+# ================================================================
 # bsc compilation flags
 
 BSC_COMPILATION_FLAGS += \
@@ -62,7 +74,7 @@ EXAMPLE ?= PLEASE_DEFINE_EXAMPLE_PATH_TO_ELF
 .PHONY: run_example
 run_example:
 	make -C  $(TESTS_DIR)/elf_to_hex
-	$(TESTS_DIR)/elf_to_hex/elf_to_hex  $(EXAMPLE)  Mem.hex
+	$(TESTS_DIR)/elf_to_hex/elf_to_hex $(RAM_BASE) $(RAM_SIZE) $(EXAMPLE)  Mem.hex
 	./exe_HW_sim  $(VERBOSITY)  +tohost
 
 # ================================================================
@@ -75,7 +87,7 @@ VERBOSITY ?= +v1
 .PHONY: test
 test:
 	make -C  $(TESTS_DIR)/elf_to_hex
-	$(TESTS_DIR)/elf_to_hex/elf_to_hex  $(TESTS_DIR)/isa/$(TEST)  Mem.hex
+	$(TESTS_DIR)/elf_to_hex/elf_to_hex $(RAM_BASE) $(RAM_SIZE) $(TESTS_DIR)/isa/$(TEST)  Mem.hex
 	./exe_HW_sim  $(VERBOSITY)  +tohost
 
 # ================================================================

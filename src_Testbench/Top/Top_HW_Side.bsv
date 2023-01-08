@@ -38,6 +38,12 @@ import PLIC           :: *;
 import C_Imports        :: *;
 import External_Control :: *;
 
+(* synthesize *)
+module mkRAM(Mem_Model_IFC#(`RAM_SIZE));
+  Mem_Model_IFC#(`RAM_SIZE) m <- mkMem_Model;
+  return m;
+endmodule
+
 // ================================================================
 // Top-level module.
 // Instantiates the SoC.
@@ -47,7 +53,7 @@ import External_Control :: *;
 module mkTop_HW_Side (Empty) ;
 
   SoC_Top_IFC    soc_top   <- mkSoC_Top;
-  Mem_Model_IFC  mem_model <- mkMem_Model;
+  Mem_Model_IFC#(`RAM_SIZE)  mem_model <- mkRAM;
   UartCon_IFC uart <- mkUartCon;
 
   // Connect SoC to raw memory

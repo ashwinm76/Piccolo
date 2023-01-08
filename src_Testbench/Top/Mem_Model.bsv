@@ -30,7 +30,7 @@ import Mem_Controller :: *;
 // ================================================================
 // Mem Model interface
 
-interface Mem_Model_IFC;
+interface Mem_Model_IFC#(numeric type size);
    // The read/write interface
    interface  MemoryServer #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  mem_server;
 endinterface
@@ -38,14 +38,13 @@ endinterface
 // ================================================================
 // Mem Model implementation
 
-(* synthesize *)
-module mkMem_Model (Mem_Model_IFC);
+module mkMem_Model (Mem_Model_IFC#(size));
 
    Integer verbosity = 0;    // 0 = quiet; 1 = verbose
 
-   Raw_Mem_Addr alloc_size = 'h_80_0000;    // 8M raw mem words, or 256MB
+   Raw_Mem_Addr alloc_size = fromInteger(valueOf(size)/(valueOf(Bits_per_Raw_Mem_Word)/8));
                    
-`ifdef INCLUDE_GDB_CONTROL
+`ifndef PRELOAD_RAM
    RegFile #(Raw_Mem_Addr, Bit #(Bits_per_Raw_Mem_Word)) rf <- mkRegFile (0, alloc_size - 1);
 `else
    RegFile #(Raw_Mem_Addr, Bit #(Bits_per_Raw_Mem_Word)) rf <- mkRegFileLoad ("Mem.hex", 0, alloc_size - 1);
