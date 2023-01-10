@@ -20,6 +20,9 @@ help:
 	@echo '                           (Bluesim, verilator or iverilog)'
 	@echo '    make  all          = make  compile  simulator'
 	@echo ''
+	@echo '    make  synth        = make  compile  simulator (for synthesis)'
+	@echo '                           (Excludes simulation specific ports from the DUT top)'
+	@echo ''
 	@echo '    make  run_example  Runs simulation executable on ELF given by EXAMPLE'
 	@echo ''
 	@echo '    make  test         Runs simulation executable on rv32ui-p-add or rv64ui-p-add'
@@ -28,8 +31,11 @@ help:
 	@echo '    make  clean        Remove intermediate build-files unnecessary for execution'
 	@echo '    make  full_clean   Restore to pristine state (pre-building anything)'
 
-.PHONY: all
+.PHONY: all synth
 all: compile  simulator
+synth: compile  simulator
+
+target synth: BSC_COMPILATION_FLAGS += -D SYNTH
 
 # ================================================================
 # Search path for bsc for .bsv files
