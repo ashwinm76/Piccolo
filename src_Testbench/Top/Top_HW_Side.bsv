@@ -99,7 +99,7 @@ module mkTop_HW_Side (Empty) ;
     soc_top.set_watch_tohost (watch_tohost, tohost_addr);
 
     // Set up the UART console model
-    uart.setup(100000000, 57600, PAR_EVEN, FLOW_CTS_RTS);
+    uart.setup(100000000, 57600, PAR_NONE, FLOW_NONE);
 
     // ----------------
     // Start timing the simulation

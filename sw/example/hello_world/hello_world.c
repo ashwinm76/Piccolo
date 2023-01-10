@@ -143,7 +143,7 @@ char uart_getc(void) {
 int main() {
   char* c = msg;
 
-  uart_init(57600, PARITY_EVEN, FLOW_CONTROL_RTSCTS);
+  uart_init(57600, PARITY_NONE, FLOW_CONTROL_NONE);
 
   // print message
   while(*c) {

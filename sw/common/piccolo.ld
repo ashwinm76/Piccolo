@@ -62,7 +62,7 @@ SEARCH_DIR("=/usr/lib")
 
 /* Default rom/ram (IMEM/DMEM) sizes */
 __piccolo_rom_size = DEFINED(__piccolo_rom_size) ? __piccolo_rom_size : 4K;
-__piccolo_ram_size = DEFINED(__piccolo_ram_size) ? __piccolo_ram_size : 256M;
+__piccolo_ram_size = DEFINED(__piccolo_ram_size) ? __piccolo_ram_size : 128k;
 
 /* Default HEAP size (= 0; no heap at all) */
 __piccolo_heap_size = DEFINED(__piccolo_heap_size) ? __piccolo_heap_size : 0;
