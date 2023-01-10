@@ -370,7 +370,7 @@ module mkUARTNeorv32(UARTNeorv32_IFC#(rxFifoSize, txFifoSize));
   Reg#(Bool) rg_cts <- mkRegU;
   Reg#(Bool) rg_rx_overr[2] <- mkCReg(2, False);
 
-  Reg#(Bit#(11)) rg_txd <- mkRegU;       // TX data register
+  Reg#(Bit#(11)) rg_txd <- mkReg(1);       // TX data register
   Reg#(Bit#(10)) rg_rxd <- mkRegU;       // RX data register
 
   // TX counters
