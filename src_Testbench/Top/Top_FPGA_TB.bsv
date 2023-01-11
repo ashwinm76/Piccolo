@@ -105,8 +105,8 @@ module mkTop_FPGA_TB(Empty);
 
   rule rl_gpio_connections;
     dut.m_gpio_inputs(0);
-    if (dut.gpio_outputs != gpio_o) begin
-      gpio_o <= dut.gpio_outputs;
+    if (zeroExtend(dut.gpio_outputs) != gpio_o) begin
+      gpio_o <= zeroExtend(dut.gpio_outputs);
       $display("%0d: GPIO Output: %h", cur_cycle, dut.gpio_outputs);
     end
   endrule

@@ -51,11 +51,11 @@ endmodule
 interface Top_FPGA_IFC;
   // GPIO Inputs
   (* always_ready, always_enabled, prefix = "" *)
-  method Action m_gpio_inputs (Bit#(64) gpio_inputs);
+  method Action m_gpio_inputs (Bit#(20) gpio_inputs);
 
   // GPIO Outputs
   (* always_ready *)
-  method Bit#(64) gpio_outputs;
+  method Bit#(28) gpio_outputs;
 
   // UART TX signals
   (* always_ready *)
@@ -98,10 +98,14 @@ module mkTop_FPGA(Top_FPGA_IFC) ;
   // INTERFACE
 
   // GPIO Inputs
-  interface m_gpio_inputs = soc_top.gpio_input;
+  method Action m_gpio_inputs (Bit#(20) gpio_inputs);
+    soc_top.gpio_input(zeroExtend(gpio_inputs));
+  endmethod
 
   // GPIO Outputs
-  interface gpio_outputs = soc_top.gpio_output;
+  method Bit#(28) gpio_outputs;
+    return truncate(soc_top.gpio_output);
+  endmethod
 
   // UART TX signals
   interface txd_o = soc_top.txd_o;
