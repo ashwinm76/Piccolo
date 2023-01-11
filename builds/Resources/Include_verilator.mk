@@ -40,7 +40,7 @@ VERILATOR_FLAGS = -CFLAGS -DMKTOP=$(VTOP)#--stats -O3 -CFLAGS -O3 -LDFLAGS -stat
 
 # Verilator flags: use the following to include code to generate VCDs
 # Select trace-depth according to your module hierarchy
-VERILATOR_FLAGS += --trace  --trace-depth 99  -CFLAGS -DVM_TRACE=1 --timescale 1ns/1ns
+VERILATOR_FLAGS += --trace  --trace-depth 99  -CFLAGS -DVM_TRACE=1 --timescale 1ns/1ps
 
 .PHONY: simulator
 simulator:

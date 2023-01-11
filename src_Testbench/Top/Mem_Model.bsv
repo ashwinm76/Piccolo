@@ -9,12 +9,11 @@ package Mem_Model;
 // ================================================================
 // BSV library imports
 
-import  RegFile      :: *;
-import  Vector       :: *;
 import  FIFOF        :: *;
-import  GetPut       :: *;
+import  BRAM         :: *;
 import  ClientServer :: *;
 import  Memory       :: *;
+import  GetPut       :: *;
 
 // ----------------
 // BSV additional libs
@@ -31,55 +30,50 @@ import Mem_Controller :: *;
 // Mem Model interface
 
 interface Mem_Model_IFC#(numeric type size);
-   // The read/write interface
-   interface  MemoryServer #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  mem_server;
+  // The read/write interface
+  interface  MemoryServer #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word)  mem_server;
 endinterface
 
 // ================================================================
 // Mem Model implementation
 
 module mkMem_Model (Mem_Model_IFC#(size));
+  FIFOF#(MemoryResponse#(Bits_per_Raw_Mem_Word)) f_mem_responses <- mkFIFOF;
 
-   Integer verbosity = 0;    // 0 = quiet; 1 = verbose
-
-   Raw_Mem_Addr alloc_size = fromInteger(valueOf(size)/(valueOf(Bits_per_Raw_Mem_Word)/8));
+  BRAM_Configure cfg = defaultValue;
+  cfg.memorySize = valueOf(TDiv#(size, TDiv#(Bits_per_Raw_Mem_Word, 8)));
                    
-`ifndef PRELOAD_RAM
-   RegFile #(Raw_Mem_Addr, Bit #(Bits_per_Raw_Mem_Word)) rf <- mkRegFile (0, alloc_size - 1);
-`else
-   RegFile #(Raw_Mem_Addr, Bit #(Bits_per_Raw_Mem_Word)) rf <- mkRegFileLoad ("Mem.hex", 0, alloc_size - 1);
+`ifndef SYNTH
+  `ifdef PRELOAD_RAM
+    cfg.loadFormat = tagged Hex "Mem.hex";
+  `endif
 `endif
+  
+  BRAM1Port#(Raw_Mem_Addr, Raw_Mem_Word) mem <- mkBRAM1Server(cfg);
 
-   FIFOF #(MemoryResponse #(Bits_per_Raw_Mem_Word))  f_raw_mem_rsps <- mkFIFOF;
+  rule rl_mem_responses;
+    let d <- mem.portA.response.get;
+    f_mem_responses.enq(MemoryResponse{ data: d });
+  endrule
 
-   // ----------------------------------------------------------------
-   // INTERFACE
+  // ----------------------------------------------------------------
+  // INTERFACE
 
-   interface MemoryServer mem_server;
-      interface Put request;
-	 method Action put (MemoryRequest  #(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word) req);
-	    if (req.address >= alloc_size) begin
-	       $display ("%0d: ERROR: Mem_Model.request.put: addr 0x%0h >= size 0x%0h (num raw-mem words)",
-			 cur_cycle, req.address, alloc_size);
-	       $finish (1);    // Assertion failure: address out of bounds
-	    end
-	    else if (req.write) begin
-	       rf.upd (req.address, req.data);
-	       if (verbosity != 0)
-		  $display ("%0d: Mem_Model write [0x%0h] <= 0x%0h", cur_cycle, req.address, req.data);
-	    end
-	    else begin
-	       let x = rf.sub (req.address);
-	       let rsp = MemoryResponse {data: x};
-	       f_raw_mem_rsps.enq (rsp);
-	       if (verbosity != 0)
-		  $display ("%0d: Mem_Model read  [0x%0h] => 0x%0h", cur_cycle, req.address, x);
-	    end
-	 endmethod
-      endinterface
+  interface MemoryServer mem_server;
+    interface Put request;
+	    method Action put(MemoryRequest#(Bits_per_Raw_Mem_Addr, Bits_per_Raw_Mem_Word) req);
+        BRAMRequest#(Raw_Mem_Addr, Raw_Mem_Word) r = BRAMRequest{
+          write: req.write,
+          responseOnWrite: False,
+          address: req.address,
+          datain: req.data
+        };
+        mem.portA.request.put(r);
+	    endmethod
+    endinterface
 
-      interface Get response = toGet (f_raw_mem_rsps);
-   endinterface
+    interface Get response = toGet(f_mem_responses);
+  endinterface
 endmodule
 
 // ================================================================
