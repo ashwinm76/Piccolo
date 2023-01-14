@@ -5,7 +5,7 @@
 
 usage_line = (
     "  Usage:\n"
-    "    $ <this_prog>    <simulation_executable>  <repo_dir>  <logs_dir>  <arch>  <opt verbosity>  <opt parallelism>\n"
+    "    $ <this_prog>    <simulation_executable>  <repo_dir>  <logs_dir>  <arch>  <RAM base> <RAM size> <opt verbosity>  <opt parallelism>\n"
     "\n"
     "  Runs the RISC-V <simulation_executable>\n"
     "  on ISA tests: ELF files taken from <repo-dir>/isa and its sub-directories.\n"
@@ -13,6 +13,10 @@ usage_line = (
     "  Runs it only on those ELF files that are relevant to architecture <arch>.\n"
     "\n"
     "  For each ELF file FOO, saves simulation output in <logs_dir>/FOO.log. \n"
+    "\n"
+    "  The RAM base address and size are specified respectively in the <RAM base>\n"
+    "  and <RAM size> parameters. Both are specified in unsized hex format.\n"
+    "  E.g., 'h8000_0000.\n"
     "\n"
     "  If <opt verbosity> is given, it must be one of the following:\n"
     "      v1:    Print instruction trace during simulation\n"
@@ -59,7 +63,7 @@ def main (argv = None):
     print ("Use flag --help  or --h for a help message")
     if ((len (argv) <= 1) or
         (argv [1] == '-h') or (argv [1] == '--help') or
-        (len (argv) < 5)):
+        (len (argv) < 7)):
 
         sys.stdout.write (usage_line)
         sys.stdout.write ("\n")
@@ -106,6 +110,10 @@ def main (argv = None):
         sys.stdout.write ("\n")
         return 1
     args_dict ['arch_string'] = arch_string
+
+    # RAM parameters
+    args_dict ['ram_base'] = argv[5]
+    args_dict ['ram_size'] = argv[6]
 
     test_families = select_test_families (arch_string)
     print ("Testing the following families of ISA tests")
@@ -385,7 +393,7 @@ def do_isa_test (args_dict, full_filename):
     (dirname, basename) = os.path.split (full_filename)
 
     # Construct the commands for sub-process execution
-    command1 = [args_dict ['elf_to_hex_exe'], full_filename, "Mem.hex"]
+    command1 = [args_dict ['elf_to_hex_exe'], args_dict ['ram_base'], args_dict ['ram_size'], full_filename, "Mem.hex"]
 
     command2 = [args_dict ['sim_path'],  "+tohost"]
     if (args_dict ['verbosity'] == 1): command2.append ("+v1")

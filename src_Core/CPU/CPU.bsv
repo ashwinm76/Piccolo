@@ -73,6 +73,10 @@ import Near_Mem_Caches :: *;
 import Near_Mem_TCM :: *;
 `endif
 
+`ifdef Near_Mem_PT
+import Near_Mem_PT :: *;
+`endif
+
 `ifdef INCLUDE_GDB_CONTROL
 import Debug_Module   :: *;
 import DM_CPU_Req_Rsp :: *;
