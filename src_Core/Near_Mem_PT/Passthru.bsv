@@ -635,11 +635,11 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       $display ("%0d: %s.rl_read_fabric_mem: ", cur_cycle, d_or_i);
 
     Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
-    fabric_addr = { fabric_addr[valueOf(Wd_Addr)-1:3], 3'b0 };
 `ifdef FABRIC32
     AXI4_Size axi4_size = axsize_4;
 `else
     AXI4_Size axi4_size = axsize_8;
+    fabric_addr = { fabric_addr[valueOf(Wd_Addr)-1:3], 3'b0 };
 `endif
     fa_fabric_send_read_req(fabric_addr, axi4_size);
     rg_state <= MEM_AWAITING_RD_RSP;
