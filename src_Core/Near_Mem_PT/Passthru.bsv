@@ -67,6 +67,11 @@ interface Passthru_IFC;
 
   // Fabric master interface
   interface AXI4_Master_IFC#(Wd_Id, Wd_Addr, Wd_Data, Wd_User) mem_master;
+
+`ifdef NO_FABRIC_BOOTROM
+  // Boot ROM client interface
+  interface Client#(Bit#(32), Bit#(32)) boot_rom;
+`endif
 endinterface
 
 // ****************************************************************
@@ -260,6 +265,11 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
   Reg#(Bit#(64)) dw_output_ld_val <- mkDWire(?);
   // stored value for ST, SC, AMO (for verification only)
   Reg#(Bit#(64)) dw_output_st_amo_val <- mkDWire(?);
+
+`ifdef NO_FABRIC_BOOTROM
+  FIFOF#(Bit#(32)) f_boot_rom_req <- mkFIFOF;
+  FIFOF#(Bit#(32)) f_boot_rom_resp <- mkFIFOF;
+`endif
 
 `ifdef ISA_A
   // Reservation regs for AMO LR/SC (Load-Reserved/Store-Conditional)
@@ -520,6 +530,9 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       // Memory ST and AMO SC
       else if ((rg_op == CACHE_ST) || is_AMO_SC) begin
         Bool do_write = True;    // Always True for ST; success/fail for AMO_SC
+`ifdef NO_FABRIC_BOOTROM
+        do_write = !soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr));
+`endif
 `ifdef ISA_A
         // ST: if to an LR/SC reserved address, invalidate the reservation
         if ((rg_op == CACHE_ST) && (rg_addr == rg_lrsc_pa)) begin
@@ -586,6 +599,11 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
               $display ("        AMO Miss: -> MEM_RD.");
         end
         else begin
+          Bool do_write = True;    // Always True for ST; success/fail for AMO_SC
+`ifdef NO_FABRIC_BOOTROM
+          // TODO: should ROM writes trigger an exception?
+          do_write = !soc_map.m_is_boot_rom_addr(rg_addr);
+`endif
           if (cfg_verbosity > 1) begin
               $display("        AMO: addr 0x%0h amo_f7 0x%0h f3 %0d rs2_val 0x%0h",
                   rg_addr, rg_amo_funct7, rg_f3, rg_st_amo_val);
@@ -599,7 +617,8 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
               rg_addr, word64, rg_st_amo_val);
 
           // Write data to fabric memory
-          fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
+          if (do_write)
+            fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
 
           if (cfg_verbosity > 1) begin
             $display("          0x%0h  op  0x%0h -> 0x%0h", word64, word64,
@@ -634,6 +653,16 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
     if (cfg_verbosity > 1)
       $display ("%0d: %s.rl_read_fabric_mem: ", cur_cycle, d_or_i);
 
+`ifdef NO_FABRIC_BOOTROM
+    if (soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+      Bit#(32) addr = truncate(rg_addr) - truncate(soc_map.m_boot_rom_addr_base);
+      f_boot_rom_req.enq(addr);
+      if (cfg_verbosity > 1)
+        $display ("%0d: %s.rl_read_fabric_mem: BOOT ROM RD: %0h", cur_cycle,
+            d_or_i, rg_addr);
+    end
+    else begin
+`endif
     Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
 `ifdef FABRIC32
     AXI4_Size axi4_size = axsize_4;
@@ -642,11 +671,36 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
     fabric_addr = { fabric_addr[valueOf(Wd_Addr)-1:3], 3'b0 };
 `endif
     fa_fabric_send_read_req(fabric_addr, axi4_size);
+`ifdef NO_FABRIC_BOOTROM
+    end
+`endif
     rg_state <= MEM_AWAITING_RD_RSP;
   endrule
 
   // Get fabric memory read responses
-  rule rl_fabric_mem_rd_rsp(rg_state == MEM_AWAITING_RD_RSP);
+  rule rl_fabric_mem_rd_rsp(rg_state == MEM_AWAITING_RD_RSP
+`ifdef NO_FABRIC_BOOTROM
+      && (!soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr))
+          || f_boot_rom_resp.notEmpty)
+`endif
+  );
+`ifdef NO_FABRIC_BOOTROM
+    if (soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+      if (rg_addr[2:0] == 'b0)
+        rg_rd_data <= tagged Valid zeroExtend(f_boot_rom_resp.first);
+      else begin
+        Bit#(64) dat = {f_boot_rom_resp.first, 32'h0};
+        rg_rd_data <= tagged Valid dat;
+      end
+      if (cfg_verbosity > 2) begin
+        $display("%0d: %s.rl_fabric_mem_rd_rsp: BOOT ROM RD", cur_cycle, d_or_i);
+        $display("        0x%0h", f_boot_rom_resp.first);
+      end
+      f_boot_rom_resp.deq;
+      rg_state <= MODULE_RUNNING;
+    end
+    else begin
+`endif
     let mem_rsp <- pop_o(master_xactor.o_rd_data);
     if (cfg_verbosity > 2) begin
       $display("%0d: %s.rl_fabric_mem_rd_rsp:", cur_cycle, d_or_i);
@@ -668,6 +722,9 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       // After reading fabric memory, redo the request
       rg_state <= MODULE_RUNNING;
     end
+`ifdef NO_FABRIC_BOOTROM
+    end
+`endif
   endrule
 
   // ----------------------------------------------------------------
@@ -970,6 +1027,11 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
 
   // Fabric master interface
   interface mem_master = master_xactor.axi_side;
+
+`ifdef NO_FABRIC_BOOTROM
+  // Boot ROM client interface
+  interface boot_rom = toGPClient(f_boot_rom_req, f_boot_rom_resp);
+`endif
 endmodule
 
 endpackage

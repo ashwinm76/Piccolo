@@ -26,6 +26,9 @@ import Near_Mem_IFC :: *;
 import AXI4_Types   :: *;
 import Fabric_Defs  :: *;
 import Passthru     :: *;
+`ifdef NO_FABRIC_BOOTROM
+import Boot_ROM     :: *;
+`endif
 
 // System address map and pc_reset value
 import SoC_Map :: *;
@@ -53,6 +56,12 @@ module mkNear_Mem(Near_Mem_IFC);
 
   Passthru_IFC imem_pt <- mkPassthru(False);
   Passthru_IFC dmem_pt <- mkPassthru(True);
+
+`ifdef NO_FABRIC_BOOTROM
+  Boot_ROM_IFC boot_rom <- mkBoot_ROM;
+  mkConnection(imem_pt.boot_rom, boot_rom.imem);
+  mkConnection(dmem_pt.boot_rom, boot_rom.dmem);
+`endif
 
   // ----------------------------------------------------------------
   // BEHAVIOR

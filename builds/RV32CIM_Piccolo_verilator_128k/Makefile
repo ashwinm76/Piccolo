@@ -21,6 +21,7 @@ BSC_COMPILATION_FLAGS += \
 	-D MULT_SYNTH    \
 	-D Near_Mem_PT    \
 	-D FABRIC64    \
+	-D NO_FABRIC_BOOTROM
 
 RAM_SIZE ?= "'h0002_0000"
 

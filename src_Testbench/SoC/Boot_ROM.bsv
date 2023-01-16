@@ -5,7 +5,8 @@ package Boot_ROM;
 // ================================================================
 // This package implements a slave IP that is a RISC-V boot ROM of
 // 1024 32b locations.
-// - Ignores all writes, always responsing OKAY
+// - There are two ports, for Imem and Dmem accesses
+// - All accesses are assumed to be reads; don't send writes!
 // - Assumes all reads are 4-byte aligned requests for 4-bytes
 
 // ================================================================
@@ -21,14 +22,12 @@ import ConfigReg :: *;
 // BSV additional libs
 
 import Cur_Cycle  :: *;
-import GetPut_Aux :: *;
-import Semi_FIFOF :: *;
+import GetPut     :: *;
+import ClientServer::*;
+import FIFOF      :: *;
 
 // ================================================================
 // Project imports
-
-import AXI4_Types  :: *;
-import Fabric_Defs :: *;
 
 // ================================================================
 // Include the auto-generated BSV-include file with the ROM function
@@ -45,155 +44,81 @@ import Fabric_Defs :: *;
 // Interface
 
 interface Boot_ROM_IFC;
-   // set_addr_map should be called after this module's reset
-   method Action set_addr_map (Fabric_Addr addr_base, Fabric_Addr addr_lim);
-
-   // Main Fabric Reqs/Rsps
-   interface AXI4_Slave_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User) slave;
+  // read requests
+  interface Server#(Bit#(32), Bit#(32)) imem;
+  interface Server#(Bit#(32), Bit#(32)) dmem;
 endinterface
 
 // ================================================================
 
 (* synthesize *)
-module mkBoot_ROM (Boot_ROM_IFC);
+module mkBoot_ROM(Boot_ROM_IFC);
 
-   // Verbosity: 0: quiet; 1: reads/writes
-   Integer verbosity = 0;
+  // Verbosity: 0: quiet; 1: reads
+  Integer verbosity = 0;
 
-   Reg #(Bool) rg_module_ready <- mkReg (False);
+  // Request and response FIFOs
+  FIFOF#(Bit#(32)) f_imem_req <- mkFIFOF;
+  FIFOF#(Bit#(32)) f_imem_resp <- mkFIFOF;
+  FIFOF#(Bit#(32)) f_dmem_req <- mkFIFOF;
+  FIFOF#(Bit#(32)) f_dmem_resp <- mkFIFOF;
 
-   Reg #(Fabric_Addr)  rg_addr_base <- mkRegU;
-   Reg #(Fabric_Addr)  rg_addr_lim  <- mkRegU;
+  // ----------------
 
-   // ----------------
-   // Connector to fabric
+  function Bool fn_addr_is_aligned(Bit#(32) addr);
+    return (addr[1:0] == 2'b_00);
+  endfunction
 
-   AXI4_Slave_Xactor_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User) slave_xactor <- mkAXI4_Slave_Xactor;
+  function Action read_rom(Bool imem_not_dmem);
+  action
+    Bit#(32) addr;
+    Bit#(32) data = 0;
+    if (imem_not_dmem) begin
+      addr = f_imem_req.first;
+      f_imem_req.deq;
+    end
+    else begin
+      addr = f_dmem_req.first;
+      f_dmem_req.deq;
+    end
+    
+    if (!fn_addr_is_aligned(addr)) begin
+      $display("%0d: ERROR: Boot_ROM.rl_process_rd_req: unraligned addr",  cur_cycle);
+      $display("    ", addr);
+    end
+    else if (addr[2:0] == 3'b0)
+      data = fn_read_ROM_0(addr);
+    else  // addr[2:0] == 3'b1_00))
+      data = fn_read_ROM_4(addr);
+    
+    if (imem_not_dmem)
+      f_imem_resp.enq(data);
+    else
+      f_dmem_resp.enq(data);
 
-   // ----------------
+    if (verbosity > 0) begin
+      $display("%0d: Boot_ROM.rl_process_rd_req: ", cur_cycle);
+      $display("        0x%0h", addr);
+      $display("     => 0x%0h", data);
+    end
+  endaction
+  endfunction
 
-   function Bool fn_addr_is_aligned (Fabric_Addr addr);
-      if (valueOf (Wd_Data) == 32)
-	 return (addr [1:0] == 2'b_00);
-      else if (valueOf (Wd_Data) == 64)
-	 return (addr [2:0] == 3'b_000);
-      else
-	 return False;
-   endfunction
+  // ================================================================
+  // BEHAVIOR
 
-   function Bool fn_addr_is_in_range (Fabric_Addr base, Fabric_Addr addr, Fabric_Addr lim);
-      return ((base <= addr) && (addr < lim));
-   endfunction
+  // ----------------------------------------------------------------
+  // Handle read requests
 
-   function Bool fn_addr_is_ok (Fabric_Addr base, Fabric_Addr addr, Fabric_Addr lim);
-      return (   fn_addr_is_aligned (addr)
-	      && fn_addr_is_in_range (base, addr, lim));
-   endfunction
+  rule rl_process_rd_req(f_imem_req.notEmpty || f_dmem_req.notEmpty);
+    read_rom(f_imem_req.notEmpty);
+  endrule
 
-   // ================================================================
-   // BEHAVIOR
+  // ================================================================
+  // INTERFACE
 
-   // ----------------------------------------------------------------
-   // Handle fabric read requests
-
-   rule rl_process_rd_req (rg_module_ready);
-      let rda <- pop_o (slave_xactor.o_rd_addr);
-
-      let byte_addr = rda.araddr - rg_addr_base;
-
-      AXI4_Resp  rresp  = axi4_resp_okay;
-      Bit #(64)  data64 = 0;
-      if (! fn_addr_is_ok (rg_addr_base, rda.araddr, rg_addr_lim)) begin
-	 rresp = axi4_resp_slverr;
-	 $display ("%0d: ERROR: Boot_ROM.rl_process_rd_req: unrecognized addr",  cur_cycle);
-	 $display ("    ", fshow (rda));
-      end
-      else if (rda.araddr [2:0] == 3'b0) begin
-	 Bit #(32) d0 = fn_read_ROM_0 (byte_addr);
-	 Bit #(32) d1 = fn_read_ROM_4 (byte_addr + 4);
-	 data64 = { d1, d0 };
-      end
-      else begin    // ((valueOf (Wd_Data) == 32) && (rda.addr [1:0] == 2'b_00))
-	 Bit #(32) d1 = fn_read_ROM_4 (byte_addr);
-	 data64 = { 0, d1 };
-      end
-	 
-      Bit #(Wd_Data) rdata  = truncate (data64);
-      let rdr = AXI4_Rd_Data {rid:   rda.arid,
-			      rdata: rdata,
-			      rresp: rresp,
-			      rlast: True,
-			      ruser: rda.aruser};
-      slave_xactor.i_rd_data.enq (rdr);
-
-      if (verbosity > 0) begin
-	 $display ("%0d: Boot_ROM.rl_process_rd_req: ", cur_cycle);
-	 $display ("        ", fshow (rda));
-	 $display ("     => ", fshow (rdr));
-      end
-   endrule
-
-   // ----------------------------------------------------------------
-   // Handle fabric write requests: ignore all of them (this is a ROM)
-
-   rule rl_process_wr_req (rg_module_ready);
-      let wra <- pop_o (slave_xactor.o_wr_addr);
-      let wrd <- pop_o (slave_xactor.o_wr_data);
-
-      AXI4_Resp  bresp = axi4_resp_okay;
-      if (! fn_addr_is_ok (rg_addr_base, wra.awaddr, rg_addr_lim)) begin
-	 bresp = axi4_resp_slverr;
-	 $display ("%0d: ERROR: Boot_ROM.rl_process_wr_req: unrecognized addr",  cur_cycle);
-	 $display ("    ", fshow (wra));
-      end
-
-      let wrr = AXI4_Wr_Resp {bid:   wra.awid,
-			      bresp: bresp,
-			      buser: wra.awuser};
-      slave_xactor.i_wr_resp.enq (wrr);
-
-      if (verbosity > 0) begin
-	 $display ("%0d: Boot_ROM.rl_process_wr_req; ignoring all writes", cur_cycle);
-	 $display ("        ", fshow (wra));
-	 $display ("        ", fshow (wrd));
-	 $display ("     => ", fshow (wrr));
-      end
-   endrule
-
-   // ================================================================
-   // INTERFACE
-
-   // set_addr_map should be called after this module's reset
-   method Action  set_addr_map (Fabric_Addr addr_base, Fabric_Addr addr_lim);
-      if (valueOf (Wd_Data) == 32) begin
-	 if (addr_base [1:0] != 0)
-	    $display ("%0d: WARNING: Boot_ROM.set_addr_map: addr_base 0x%0h is not 4-Byte-aligned",
-		      cur_cycle, addr_base);
-
-	 if (addr_lim [1:0] != 0)
-	    $display ("%0d: WARNING: Boot_ROM.set_addr_map: addr_lim 0x%0h is not 4-Byte-aligned",
-		      cur_cycle, addr_lim);
-      end
-      else if (valueOf (Wd_Data) == 64) begin
-	 if (addr_base [2:0] != 0)
-	    $display ("%0d: WARNING: Boot_ROM.set_addr_map: addr_base 0x%0h is not 4-Byte-aligned",
-		      cur_cycle, addr_base);
-
-	 if (addr_lim [2:0] != 0)
-	    $display ("%0d: WARNING: Boot_ROM.set_addr_map: addr_lim 0x%0h is not 4-Byte-aligned",
-		      cur_cycle, addr_lim);
-      end
-
-      rg_addr_base    <= addr_base;
-      rg_addr_lim     <= addr_lim;
-      rg_module_ready <= True;
-      if (verbosity > 0) begin
-	 $display ("%0d: Boot_ROM.set_addr_map: base 0x%0h lim 0x%0h", cur_cycle, addr_base, addr_lim);
-      end
-   endmethod
-
-   // Main Fabric Reqs/Rsps
-   interface  slave = slave_xactor.axi_side;
+  interface imem = toGPServer(f_imem_req, f_imem_resp);
+  interface dmem = toGPServer(f_dmem_req, f_dmem_resp);
 endmodule
 
 // ================================================================

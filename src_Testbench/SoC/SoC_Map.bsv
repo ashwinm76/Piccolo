@@ -97,6 +97,9 @@ interface SoC_Map_IFC;
    method  Bool  m_is_mem_addr (Fabric_Addr addr);
 
    (* always_ready *)
+   method Bool m_is_boot_rom_addr (Fabric_Addr addr);
+
+   (* always_ready *)
    method  Bool  m_is_IO_addr (Fabric_Addr addr);
 
    (* always_ready *)
@@ -290,6 +293,7 @@ module mkSoC_Map (SoC_Map_IFC);
    method  Fabric_Addr  m_tcm_addr_lim  = tcm_addr_lim;
 
    method  Bool  m_is_mem_addr (Fabric_Addr addr) = fn_is_mem_addr (addr);
+   method  Bool  m_is_boot_rom_addr (Fabric_Addr addr) = fn_is_boot_rom_addr (addr);
 
    method  Bool  m_is_IO_addr (Fabric_Addr addr) = fn_is_IO_addr (addr);
 

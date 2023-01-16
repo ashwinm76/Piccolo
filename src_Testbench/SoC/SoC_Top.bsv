@@ -52,7 +52,11 @@ import Core_IFC :: *;
 import Core     :: *;
 import PLIC     :: *;    // For interface to PLIC interrupt sources, in Core_IFC
 
+`ifdef NO_FABRIC_BOOTROM
 import Boot_ROM       :: *;
+`else
+import Boot_ROM_AXI4  :: *;
+`endif
 import Mem_Controller :: *;
 import UART_Neorv32_Model     :: *;
 import GPIO_Model     :: *;
@@ -152,13 +156,16 @@ module mkSoC_Top (SoC_Top_IFC);
    // SoC Fabric
    Fabric_AXI4_IFC  fabric <- mkFabric_AXI4;
 
-   // SoC Boot ROM
+`ifndef NO_FABRIC_BOOTROM
+   // SoC Boot ROM on AXI4
    Boot_ROM_IFC  boot_rom <- mkBoot_ROM;
+
    // AXI4 Deburster in front of Boot_ROM
    AXI4_Deburster_IFC #(Wd_Id,
 			Wd_Addr,
 			Wd_Data,
 			Wd_User)  boot_rom_axi4_deburster <- mkAXI4_Deburster_A;
+`endif
 
    // SoC Memory
    Mem_Controller_IFC  mem0_controller <- mkMem_Controller;
@@ -196,9 +203,15 @@ module mkSoC_Top (SoC_Top_IFC);
    // SoC fabric slave connections
    // Note: see 'SoC_Map' for 'slave_num' definitions
 
+`ifdef NO_FABRIC_BOOTROM
+  AXI4_Slave_IFC#(Wd_Id, Wd_Addr, Wd_Data, Wd_User) dummy_bootrom_slave = 
+      dummy_AXI4_Slave_ifc;
+  mkConnection(fabric.v_to_slaves[boot_rom_slave_num], dummy_bootrom_slave);
+`else
    // Fabric to Boot ROM
    mkConnection (fabric.v_to_slaves [boot_rom_slave_num], boot_rom_axi4_deburster.from_master);
    mkConnection (boot_rom_axi4_deburster.to_slave,        boot_rom.slave);
+`endif
 
    // Fabric to Deburster to Mem Controller
    mkConnection (fabric.v_to_slaves [mem0_controller_slave_num], mem0_controller_axi4_deburster.from_master);
@@ -291,8 +304,10 @@ module mkSoC_Top (SoC_Top_IFC);
    let gpio0_rsp           <- gpio0.server_reset.response.get;
 
 	 // Initialize address maps of slave IPs
+`ifndef NO_FABRIC_BOOTROM
 	 boot_rom.set_addr_map (soc_map.m_boot_rom_addr_base,
 				soc_map.m_boot_rom_addr_lim);
+`endif
 
 	 mem0_controller.set_addr_map (soc_map.m_mem0_controller_addr_base,
 				       soc_map.m_mem0_controller_addr_lim);
@@ -308,9 +323,11 @@ module mkSoC_Top (SoC_Top_IFC);
 
 	 if (verbosity != 0) begin
 	    $display ("  SoC address map:");
+`ifndef NO_FABRIC_BOOTROM
 	    $display ("  Boot ROM:        0x%0h .. 0x%0h",
 		      soc_map.m_boot_rom_addr_base,
 		      soc_map.m_boot_rom_addr_lim);
+`endif
 	    $display ("  Mem0 Controller: 0x%0h .. 0x%0h",
 		      soc_map.m_mem0_controller_addr_base,
 		      soc_map.m_mem0_controller_addr_lim);
