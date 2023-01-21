@@ -26,10 +26,14 @@ import SoC_Map      :: *;
 import AXI4_Types   :: *;
 import Fabric_Defs  :: *;
 
+`ifdef NO_FABRIC_PLIC
+import Near_Reg_IFC :: *;
+`endif
+
 // ================================================================
 // Exports
 
-export Passthru_IFC(..), mkPassthru;
+export Passthru_IFC(..), mkDMEM_PT, mkIMEM_PT;
 
 // ================================================================
 // Passthrough interface
@@ -71,6 +75,11 @@ interface Passthru_IFC;
 `ifdef NO_FABRIC_BOOTROM
   // Boot ROM client interface
   interface Client#(Bit#(32), Bit#(32)) boot_rom;
+`endif
+
+`ifdef NO_FABRIC_PLIC
+  // PLIC near interface
+  interface Near_Reg_Master_IFC plic_reg_access;
 `endif
 endinterface
 
@@ -269,6 +278,13 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
 `ifdef NO_FABRIC_BOOTROM
   FIFOF#(Bit#(32)) f_boot_rom_req <- mkFIFOF;
   FIFOF#(Bit#(32)) f_boot_rom_resp <- mkFIFOF;
+`endif
+
+`ifdef NO_FABRIC_PLIC
+  FIFOF#(Near_Reg_Rd_Req) f_plic_rd_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Resp) f_plic_rd_resp <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Req) f_plic_wr_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Resp) f_plic_wr_resp <- mkFIFOF;
 `endif
 
 `ifdef ISA_A
@@ -616,7 +632,7 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
           match {.new_ld_val, .new_st_val} = fn_amo_op(rg_f3, rg_amo_funct7,
               rg_addr, word64, rg_st_amo_val);
 
-          // Write data to fabric memory
+          // Write data to target
           if (do_write)
             fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
 
@@ -677,15 +693,39 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
     rg_state <= MEM_AWAITING_RD_RSP;
   endrule
 
-  // Get fabric memory read responses
-  rule rl_fabric_mem_rd_rsp(rg_state == MEM_AWAITING_RD_RSP
+function Bool fn_is_fabric_req;
+  Bool ret = True;
 `ifdef NO_FABRIC_BOOTROM
-      && (!soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr))
-          || f_boot_rom_resp.notEmpty)
+  ret = ret && !soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr));
 `endif
-  );
+`ifdef NO_FABRIC_PLIC
+  ret = ret && !soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr));
+`endif
+  return ret;
+endfunction
+
+function Bool fn_is_near_mem_rd_resp_pending;
+  Bool ret = False;
 `ifdef NO_FABRIC_BOOTROM
-    if (soc_map.m_is_boot_rom_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+  ret = ret || f_boot_rom_resp.notEmpty;
+`endif
+  return ret;
+endfunction
+
+function Bool fn_is_io_rd_resp_pending;
+  Bool ret = False;
+`ifdef NO_FABRIC_PLIC
+  ret = ret || f_plic_rd_resp.notEmpty;
+`endif
+  return ret;
+endfunction
+
+  // Get fabric memory read responses
+  rule rl_fabric_mem_rd_rsp(
+      rg_state == MEM_AWAITING_RD_RSP &&
+      (fn_is_fabric_req || fn_is_near_mem_rd_resp_pending));
+`ifdef NO_FABRIC_BOOTROM
+    if (f_boot_rom_resp.notEmpty) begin
       if (rg_addr[2:0] == 'b0)
         rg_rd_data <= tagged Valid zeroExtend(f_boot_rom_resp.first);
       else begin
@@ -723,7 +763,7 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       rg_state <= MODULE_RUNNING;
     end
 `ifdef NO_FABRIC_BOOTROM
-    end
+  end
 `endif
   endrule
 
@@ -749,8 +789,21 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       $display ("%0d: %s.rl_io_read_req; f3 0x%0h paddr %0h",
           cur_cycle, d_or_i, rg_f3, rg_addr);
 
+`ifdef NO_FABRIC_PLIC
+    if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+      let nr_req = Near_Reg_Rd_Req { araddr: truncate(rg_addr) };
+      f_plic_rd_req.enq(nr_req);
+      if (cfg_verbosity > 1)
+        $display ("%0d: %s.rl_io_read_req: PLIC RD: %0h", cur_cycle,
+            d_or_i, rg_addr);
+    end
+    else begin
+`endif
     Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
     fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_PLIC
+    end
+`endif
 
 `ifdef ISA_A
     // Invalidate LR/SC reservation if AMO_LR
@@ -762,19 +815,41 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
   // ----------------------------------------------------------------
   // Receive I/O read response from fabric
 
-  rule rl_io_read_rsp((rg_state == IO_AWAITING_RD_RSP));
-    let rd_data <- pop_o(master_xactor.o_rd_data);
-    if (cfg_verbosity > 1) begin
-      $display ("%0d: %s.rl_io_read_rsp: paddr 0x%0h", cur_cycle, d_or_i, rg_addr);
-      $display ("    ", fshow(rd_data));
+  rule rl_io_read_rsp(rg_state == IO_AWAITING_RD_RSP &&
+      (fn_is_fabric_req || fn_is_io_rd_resp_pending));
+    Bit#(64) rdata;
+    Bool resp_ok;
+`ifdef NO_FABRIC_PLIC
+    if (f_plic_rd_resp.notEmpty) begin
+      let rd_data = f_plic_rd_resp.first;
+      f_plic_rd_resp.deq;
+      // TODO: this is a workaround. The correct solution is to parametrize
+      // data widths throughout the design, instead of fixing it at 64 bits
+      rdata = {rd_data.rdata, rd_data.rdata};
+      resp_ok = rd_data.rresp == RESP_OK;
+      if (cfg_verbosity > 2) begin
+        $display("%0d: %s.rl_io_read_rsp: PLIC RD", cur_cycle, d_or_i);
+        $display("        ", fshow(rd_data));
+      end
     end
+    else begin
+`endif
+      let rd_data <- pop_o(master_xactor.o_rd_data);
+      rdata = rd_data.rdata;
+      resp_ok = rd_data.rresp == axi4_resp_okay;
+      if (cfg_verbosity > 1) begin
+        $display ("%0d: %s.rl_io_read_rsp: paddr 0x%0h", cur_cycle, d_or_i, rg_addr);
+        $display ("    ", fshow(rd_data));
+      end
+`ifdef NO_FABRIC_PLIC
+    end
+`endif
 
-    let ld_val = fn_extract_and_extend_bytes(rg_f3, rg_addr, 
-        zeroExtend(rd_data.rdata));
+    let ld_val = fn_extract_and_extend_bytes(rg_f3, rg_addr, zeroExtend(rdata));
     rg_ld_val <= ld_val;
 
     // Successful read
-    if (rd_data.rresp == axi4_resp_okay) begin
+    if (resp_ok) begin
       fa_drive_IO_read_rsp(rg_f3, rg_addr, ld_val);
       rg_state <= IO_RD_RSP;
     end
@@ -812,9 +887,17 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       $display ("%0d: %s: rl_io_write_req; f3 0x%0h paddr %0h  word64 0x%0h",
           cur_cycle, d_or_i, rg_f3, rg_addr, rg_st_amo_val);
 
-    fa_fabric_send_write_req(rg_f3, rg_addr, rg_st_amo_val);
-    rg_state <= MEM_ST_AMO_RSP;
+`ifdef NO_FABRIC_PLIC
+    if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr)))
+      f_plic_wr_req.enq(Near_Reg_Wr_Req{
+        awaddr: rg_addr, 
+        wdata: truncate(rg_st_amo_val)
+      });
+    else
+`endif
+      fa_fabric_send_write_req(rg_f3, rg_addr, rg_st_amo_val);
 
+    rg_state <= MEM_ST_AMO_RSP;
     if (cfg_verbosity > 1)
       $display ("    => rl_ST_AMO_response");
   endrule
@@ -847,8 +930,18 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       $display ("%0d: %s.rl_io_AMO_op_req; f3 0x%0h paddr %0h",
           cur_cycle, d_or_i, rg_f3, rg_addr);
 
-    Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
-    fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_PLIC
+    if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr)))
+      f_plic_rd_req.enq(Near_Reg_Rd_Req{
+        araddr: rg_addr
+      });
+    else begin
+`endif
+      Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
+      fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_PLIC
+    end
+``endif
     rg_state <= IO_AWAITING_AMO_RD_RSP;
   endrule
 `endif
@@ -858,19 +951,41 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
   // Do the AMO op, and send store to fabric
 
 `ifdef ISA_A
-  rule rl_io_AMO_read_rsp(rg_state == IO_AWAITING_AMO_RD_RSP);
+  rule rl_io_AMO_read_rsp(rg_state == IO_AWAITING_AMO_RD_RSP &&
+      (fn_is_fabric_req || fn_is_io_rd_resp_pending));
+    Bit#(64) rdata;
+    Bool resp_ok;
+`ifdef NO_FABRIC_PLIC
+    if (f_plic_rd_resp.notEmpty) begin
+      let rd_data = f_plic_rd_resp.first;
+      f_plic_rd_resp.deq;
+      // TODO: this is a workaround. The correct solution is to parametrize
+      // data widths throughout the design, instead of fixing it at 64 bits
+      rdata = {rd_data.rdata, rd_data.rdata};
+      resp_ok = rd_data.rresp == RESP_OK;
+      if (cfg_verbosity > 2) begin
+        $display("%0d: %s.rl_io_AMO_read_rsp: PLIC RD", cur_cycle, d_or_i);
+        $display("        ", fshow(rd_data));
+      end
+    end
+    else begin
+`endif
     let rd_data <- pop_o(master_xactor.o_rd_data);
+    rdata = rd_data.rdata;
+    resp_ok = rd_data.rresp == axi4_resp_okay;
     if (cfg_verbosity > 1) begin
       $display("%0d: %s.rl_io_AMO_read_rsp: paddr 0x%0h", cur_cycle, d_or_i,
           rg_addr);
       $display ("    ", fshow(rd_data));
     end
+`ifdef NO_FABRIC_PLIC
+    end
+`endif
 
-    let ld_val = fn_extract_and_extend_bytes(rg_f3, rg_addr,
-        zeroExtend(rd_data.rdata));
+    let ld_val = fn_extract_and_extend_bytes(rg_f3, rg_addr, zeroExtend(rdata));
 
     // Bus error for AMO read
-    if (rd_data.rresp != axi4_resp_okay) begin
+    if (!resp_ok) begin
       rg_state <= MODULE_EXCEPTION_RSP;
       rg_exc_code <= exc_code_STORE_AMO_ACCESS_FAULT;
       if (cfg_verbosity > 1)
@@ -887,8 +1002,16 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
       match {.new_ld_val, .new_st_val} = fn_amo_op(rg_f3, rg_amo_funct7,
           rg_addr, ld_val, rg_st_amo_val);
 
-      // Write back new st_val to fabric
-      fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
+`ifdef NO_FABRIC_PLIC
+      if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr)))
+        f_plic_wr_req.enq(Near_Reg_Wr_Req{
+          awaddr: rg_addr, 
+          wdata: truncate(new_st_val)
+        });
+      else
+`endif
+        // Write back new st_val to fabric
+        fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
 
       fa_drive_IO_read_rsp(rg_f3, rg_addr, new_ld_val);
       rg_ld_val <= new_ld_val;
@@ -927,6 +1050,23 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
           cur_cycle, d_or_i, ctr_wr_rsps_pending.value, fshow(wr_resp));
     end
   endrule
+
+`ifdef NO_FABRIC_PLIC
+  // Discard PLIC write responses
+  rule discard_plic_wr_resp(f_plic_wr_resp.notEmpty);
+    let wresp = f_plic_wr_resp.first;
+    f_plic_wr_resp.deq;
+
+    // TODO: do we need credit counters for PLIC, like for the fabric?
+
+    if (wresp.bresp != RESP_OK) begin
+      // TODO: need to raise a non-maskable interrupt (NMI) here
+      $display("%0d: %s.discard_plic_wr_resp: PLIC response error: exit",
+          cur_cycle, d_or_i);
+      $display("    ", fshow (wresp));
+    end
+  endrule
+`endif
 
   // ----------------------------------------------------------------
   // This rule drives an exception response until this module is put
@@ -992,11 +1132,15 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
 
     if (!fn_is_aligned(f3, addr)) begin
       // We detect misaligned accesses and trap on them
+      if (cfg_verbosity > 5)
+        $display("%0d: %m.req: => MODULE_EXCEPTION_RSP", cur_cycle);
       rg_state <= MODULE_EXCEPTION_RSP;
       rg_exc_code <= ((op == CACHE_LD) ? exc_code_LOAD_ADDR_MISALIGNED : 
           exc_code_STORE_AMO_ADDR_MISALIGNED);
     end
     else begin
+      if (cfg_verbosity > 5)
+        $display("%0d: %m.req: => MODULE_RUNNING", cur_cycle);
       rg_state <= MODULE_RUNNING;
     end
   endmethod
@@ -1029,9 +1173,30 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
   interface mem_master = master_xactor.axi_side;
 
 `ifdef NO_FABRIC_BOOTROM
-  // Boot ROM client interface
+  // Boot ROM master interface
   interface boot_rom = toGPClient(f_boot_rom_req, f_boot_rom_resp);
 `endif
+
+`ifdef NO_FABRIC_PLIC
+  // PLIC master interface
+  interface Near_Reg_Master_IFC plic_reg_access;
+    interface reg_rd = toGPClient(f_plic_rd_req, f_plic_rd_resp);
+    interface reg_wr = toGPClient(f_plic_wr_req, f_plic_wr_resp);
+  endinterface
+`endif
+endmodule
+
+// ----------------------------------------------------------------
+// DMEM and IMEM specializations
+
+module mkDMEM_PT(Passthru_IFC);
+  Passthru_IFC dmem <- mkPassthru(True);
+  return dmem;
+endmodule
+
+module mkIMEM_PT(Passthru_IFC);
+  Passthru_IFC imem <- mkPassthru(False);
+  return imem;
 endmodule
 
 endpackage

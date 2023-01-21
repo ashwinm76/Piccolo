@@ -105,6 +105,9 @@ interface SoC_Map_IFC;
    (* always_ready *)
    method  Bool  m_is_near_mem_IO_addr (Fabric_Addr addr);
 
+   (* always_ready *)
+   method  Bool  m_is_plic_addr (Fabric_Addr addr);
+
    (* always_ready *)   method  Bit #(64)  m_pc_reset_value;
    (* always_ready *)   method  Bit #(64)  m_mtvec_reset_value;
 
@@ -237,7 +240,9 @@ module mkSoC_Map (SoC_Map_IFC);
 
    function Bool fn_is_IO_addr (Fabric_Addr addr);
       return (   fn_is_near_mem_io_addr (addr)
+`ifdef Near_Mem_PT
 	      || fn_is_plic_addr (addr)
+`endif
 	      || fn_is_uart0_addr  (addr)
              || fn_is_gpio0_addr  (addr)
 `ifdef INCLUDE_ACCEL0
@@ -294,10 +299,9 @@ module mkSoC_Map (SoC_Map_IFC);
 
    method  Bool  m_is_mem_addr (Fabric_Addr addr) = fn_is_mem_addr (addr);
    method  Bool  m_is_boot_rom_addr (Fabric_Addr addr) = fn_is_boot_rom_addr (addr);
-
    method  Bool  m_is_IO_addr (Fabric_Addr addr) = fn_is_IO_addr (addr);
-
    method  Bool  m_is_near_mem_IO_addr (Fabric_Addr addr) = fn_is_near_mem_io_addr (addr);
+   method  Bool  m_is_plic_addr (Fabric_Addr addr) = fn_is_plic_addr (addr);
 
    method  Bit #(64)  m_pc_reset_value     = pc_reset_value;
    method  Bit #(64)  m_mtvec_reset_value  = mtvec_reset_value;

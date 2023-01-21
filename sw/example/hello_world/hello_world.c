@@ -1,7 +1,24 @@
 #include <stdint.h>
+#include <stdarg.h>
 
 #define CLKRATE (100000000)
 #define GPIO_BASE ((volatile uint32_t*)0xC0001000)
+
+/* PLIC parameters */
+#define PLIC_NUM_SOURCES (16)
+#define PLIC_NUM_TARGETS (2)
+#define PLIC_MAX_PRIO (7)
+#define PLIC_BASE ((volatile uint32_t*)0x0C000000)
+
+/* PLIC register word offsets */
+#define PLIC_PRIO_OFFS (0/4)
+#define PLIC_IPEND_OFFS (0x1000/4)
+#define PLIC_IENA_T0_OFFS (0x2000/4)
+#define PLIC_IENABLK_SIZE (0x80/4)
+#define PLIC_THRE_T0_OFFS (0x00200000/4)
+#define PLIC_THREBLK_SIZE (0x1000/4)
+#define PLIC_CLCM_T0_OFFS (0x00200004/4)
+#define PLIC_CLCMBLK_SIZE (0x1000/4)
 
 typedef struct __attribute__((packed,aligned(4))) {
   uint32_t CTRL;
@@ -72,8 +89,12 @@ enum NEORV32_UART_DATA_enum {
   UART_DATA_AVAIL = 31  /**< UART receive/transmit data register(31) (r/-): RX data available when set */
 };
 
-uint64_t tohost;
+volatile uint64_t tohost;
 char* msg = "Hello World\n";
+
+static void __uart_itoa(uint32_t x, char *res);
+static void __uart_tohex(uint32_t x, char *res);
+static void __uart_touppercase(uint32_t len, char *ptr);
 
 void uart_init(uint32_t baudrate, uint8_t parity, uint8_t flow_con) {
   UART.CTRL = 0;
@@ -118,6 +139,12 @@ void uart_putc(char c) {
   UART.DATA = ((uint32_t)c) << UART_DATA_LSB;
 }
 
+void uart_puts(char *s) {
+  while(*s) {
+    uart_putc(*s++);
+  }
+}
+
 int uart_tx_busy(void) {
 
   uint32_t ctrl = UART.CTRL;
@@ -140,10 +167,181 @@ char uart_getc(void) {
   }
 }
 
+void uart_printf(const char *format, ...) {
+  char c, string_buf[11];
+  int32_t n;
+
+  va_list a;
+  va_start(a, format);
+
+  while ((c = *format++)) {
+    if (c == '%') {
+      c = *format++;
+      switch (c) {
+        case 's': // string
+          uart_puts(va_arg(a, char*));
+          break;
+        case 'c': // char
+          uart_putc((char)va_arg(a, int));
+          break;
+        case 'i': // 32-bit signed
+        case 'd':
+          n = (int32_t)va_arg(a, int32_t);
+          if (n < 0) {
+            n = -n;
+            uart_putc('-');
+          }
+          __uart_itoa((uint32_t)n, string_buf);
+          uart_puts(string_buf);
+          break;
+        case 'u': // 32-bit unsigned
+          __uart_itoa(va_arg(a, uint32_t), string_buf);
+          uart_puts(string_buf);
+          break;
+        case 'x': // 32-bit hexadecimal
+        case 'p':
+        case 'X':
+          __uart_tohex(va_arg(a, uint32_t), string_buf);
+          if (c == 'X') {
+            __uart_touppercase(11, string_buf);
+          }
+          uart_puts(string_buf);
+          break;
+        default: // unsupported format
+          uart_putc('%');
+          uart_putc(c);
+          break;
+      }
+    }
+    else {
+      uart_putc(c);
+    }
+  }
+  va_end(a);
+}
+
+static void __uart_itoa(uint32_t x, char *res) {
+  static const char numbers[] = "0123456789";
+  char buffer1[11];
+  uint16_t i, j;
+
+  buffer1[10] = '\0';
+  res[10] = '\0';
+
+  // convert
+  for (i=0; i<10; i++) {
+    buffer1[i] = numbers[x%10];
+    x /= 10;
+  }
+
+  // delete 'leading' zeros
+  for (i=9; i!=0; i--) {
+    if (buffer1[i] == '0')
+      buffer1[i] = '\0';
+    else
+      break;
+  }
+
+  // reverse
+  j = 0;
+  do {
+    if (buffer1[i] != '\0')
+      res[j++] = buffer1[i];
+  } while (i--);
+
+  res[j] = '\0'; // terminate result string
+}
+
+static void __uart_tohex(uint32_t x, char *res) {
+  static const char symbols[] = "0123456789abcdef";
+  int i;
+  for (i=0; i<8; i++) { // nibble by nibble
+    uint32_t num_tmp = x >> (4*i);
+    res[7-i] = (char)symbols[num_tmp & 0x0f];
+  }
+
+  res[8] = '\0'; // terminate result string
+}
+
+static void __uart_touppercase(uint32_t len, char *ptr) {
+  char tmp;
+  while (len > 0) {
+    tmp = *ptr;
+    if ((tmp >= 'a') && (tmp <= 'z')) {
+      *ptr = tmp - 32;
+    }
+    ptr++;
+    len--;
+  }
+}
+
+void plic_test() {
+  uint32_t d;
+  (void)d;
+
+  // Write priorities
+  uart_puts("PLIC Priorities WR\n");
+  for(int i=1; i<PLIC_NUM_SOURCES; i++) {
+    *(PLIC_BASE + PLIC_PRIO_OFFS + i) = i;
+  }
+  // Read priorities
+  uart_puts("PLIC Priorities RD\n");
+  for(int i=1; i<PLIC_NUM_SOURCES; i++) {
+    d = *(PLIC_BASE + PLIC_PRIO_OFFS + i);
+    uart_printf("Pri[%d] = %u\n", i, d);
+  }
+
+  // Read Interrupt pending status
+  uart_puts("PLIC IPs RD\n");
+  for(int i=0; i<PLIC_NUM_SOURCES; i+=32) {
+    d = *(PLIC_BASE + PLIC_IPEND_OFFS + i);
+    uart_printf("IP[%d] = %u\n", i, d);
+  }
+
+  // Write Interrupt enable per source per target
+  uart_puts("PLIC IEs WR\n");
+  for(int i=0; i<PLIC_NUM_TARGETS; i++) {
+    for(int j=0; j<PLIC_NUM_SOURCES; j+=32) {
+      *(PLIC_BASE + PLIC_IENA_T0_OFFS + i*PLIC_IENABLK_SIZE + j) = 
+          i*PLIC_IENABLK_SIZE + j;
+    }
+  }
+  // Read Interrupt enable per source per target
+  uart_puts("PLIC IEs RD\n");
+  for(int i=0; i<PLIC_NUM_TARGETS; i++) {
+    for(int j=0; j<PLIC_NUM_SOURCES; j+=32) {
+      d = *(PLIC_BASE + PLIC_IENA_T0_OFFS + i*PLIC_IENABLK_SIZE + j);
+      uart_printf("IE[%d][%d] = %u\n", i, j, d);
+    }
+  }
+
+  // Write threshholds
+  uart_puts("PLIC Threshholds WR\n");
+  for(int i=0; i<PLIC_NUM_TARGETS; i++) {
+    *(PLIC_BASE + PLIC_THRE_T0_OFFS + i*PLIC_THREBLK_SIZE) = i+1;
+  }
+  // Read threshholds
+  uart_puts("PLIC Threshholds RD\n");
+  for(int i=0; i<PLIC_NUM_TARGETS; i++) {
+    d = *(PLIC_BASE + PLIC_THRE_T0_OFFS + i*PLIC_THREBLK_SIZE);
+    uart_printf("Thres[%d] = %u\n", i, d);
+  }
+
+  // Read claim/complete
+  uart_puts("PLIC Claim/completes RD\n");
+  for(int i=0; i<PLIC_NUM_TARGETS; i++) {
+    d = *(PLIC_BASE + PLIC_CLCM_T0_OFFS + i*PLIC_CLCMBLK_SIZE);
+    uart_printf("CLCM[%d] = %u\n", i, d);
+  }
+}
+
 int main() {
   char* c = msg;
 
   uart_init(57600, PARITY_NONE, FLOW_CONTROL_NONE);
+
+  // exercise PLIC
+  plic_test();
 
   // print message
   while(*c) {
@@ -169,6 +367,7 @@ int main() {
     *(volatile uint32_t*)(GPIO_BASE+2) = i;
     i <<= 1;
   }
+
   tohost = 1;
   return 0;
 }

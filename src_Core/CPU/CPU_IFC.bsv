@@ -20,6 +20,10 @@ import Fabric_Defs :: *;
 import AXI4_Lite_Types :: *;
 `endif
 
+`ifdef NO_FABRIC_PLIC
+import Near_Reg_IFC :: *;
+`endif
+
 `ifdef INCLUDE_GDB_CONTROL
 import DM_CPU_Req_Rsp :: *;
 `endif
@@ -49,6 +53,12 @@ interface CPU_IFC;
 
 `ifdef INCLUDE_DMEM_SLAVE
    interface AXI4_Lite_Slave_IFC #(Wd_Addr, Wd_Data, Wd_User)  dmem_slave;
+`endif
+
+    // ----------------
+    // PLIC
+`ifdef NO_FABRIC_PLIC
+  interface Near_Reg_Master_IFC plic;
 `endif
 
    // ----------------

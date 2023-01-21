@@ -42,6 +42,10 @@ import Fabric_Defs :: *;
 import AXI4_Lite_Types :: *;
 `endif
 
+`ifdef NO_FABRIC_PLIC
+import Near_Reg_IFC    :: *;
+`endif
+
 // ================================================================
 
 interface Near_Mem_IFC;
@@ -65,6 +69,12 @@ interface Near_Mem_IFC;
 
    // Fabric side
    interface AXI4_Master_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User) dmem_master;
+
+   // ----------------
+   // PLIC
+`ifdef NO_FABRIC_PLIC
+   interface Near_Reg_Master_IFC plic;
+`endif
 
    // ----------------------------------------------------------------
    // Optional AXI4-Lite DMem slave interface

@@ -316,8 +316,14 @@ module mkCore (Core_IFC #(N_External_Interrupt_Sources));
    // Slaves on the local 2x3 fabric
    // default slave is taken out directly to the Core interface
    mkConnection (fabric_2x3.v_to_slaves [near_mem_io_slave_num], near_mem_io.axi4_slave);
+`ifdef NO_FABRIC_PLIC
+   mkConnection(cpu.plic, plic.reg_access);
+   AXI4_Slave_IFC #(Wd_Id, Wd_Addr, Wd_Data, Wd_User)
+      dummy_plic = dummy_AXI4_Slave_ifc;
+   mkConnection (fabric_2x3.v_to_slaves [plic_slave_num],        dummy_plic);
+`else
    mkConnection (fabric_2x3.v_to_slaves [plic_slave_num],        plic.axi4_slave);
-
+`endif
    // ================================================================
    // Connect interrupt lines from near_mem_io and PLIC to CPU
 

@@ -26,8 +26,13 @@ import Near_Mem_IFC :: *;
 import AXI4_Types   :: *;
 import Fabric_Defs  :: *;
 import Passthru     :: *;
+
 `ifdef NO_FABRIC_BOOTROM
 import Boot_ROM     :: *;
+`endif
+
+`ifdef NO_FABRIC_PLIC
+import Near_Reg_IFC :: *;
 `endif
 
 // System address map and pc_reset value
@@ -54,8 +59,8 @@ module mkNear_Mem(Near_Mem_IFC);
   // Reset response queue
   FIFOF#(Token) f_reset_rsps <- mkFIFOF;
 
-  Passthru_IFC imem_pt <- mkPassthru(False);
-  Passthru_IFC dmem_pt <- mkPassthru(True);
+  Passthru_IFC imem_pt <- mkIMEM_PT;
+  Passthru_IFC dmem_pt <- mkDMEM_PT;
 
 `ifdef NO_FABRIC_BOOTROM
   Boot_ROM_IFC boot_rom <- mkBoot_ROM;
@@ -219,6 +224,12 @@ module mkNear_Mem(Near_Mem_IFC);
   method Action sfence_vma;
     noAction;
   endmethod
+
+  // ---------------
+  // PLIC
+`ifdef NO_FABRIC_PLIC
+  interface plic = dmem_pt.plic_reg_access;
+`endif
 
 endmodule
 

@@ -1648,6 +1648,12 @@ module mkCPU (CPU_IFC);
    interface  dmem_slave = near_mem.dmem_slave;
 `endif
 
+    // ----------------
+    // PLIC
+`ifdef NO_FABRIC_PLIC
+    interface plic = near_mem.plic;
+`endif
+
    // ----------------
    // External interrupts
 
