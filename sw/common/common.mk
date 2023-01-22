@@ -72,7 +72,7 @@ PICCOLO_SW_COM_PATH = $(PICCOLO_SW_HOME)/common
 # Path to main Piccolo-SW library include files
 PICCOLO_SW_INC_PATH = $(PICCOLO_SW_HOME)/lib/include
 # Path to main Piccolo-SW library source files
-PICCOLO_SW_SRC_PATH = $(PICCOLO_SW_HOME)/lib/source
+PICCOLO_SW_SRC_PATH = $(PICCOLO_SW_HOME)/lib/src
 # Path to Piccolo-SW executable generator
 PICCOLO_SW_EXG_PATH = $(PICCOLO_SW_HOME)/image_gen
 

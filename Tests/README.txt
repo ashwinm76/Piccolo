@@ -49,7 +49,7 @@ for usage information.
 
 Example:
 
-    $ ./Run_regression.py  ../RV32IMU_verilator/exe_HW_sim  ./isa  ./Logs  v1
+    $ ./Run_regression.py  isa ../RV32IMU_verilator/exe_HW_sim  ./isa  ./Logs  v1
 
 will run the verilator simulation executable on the all RISC-V ISA
 tests that match the following:
@@ -64,7 +64,7 @@ Each log will contain an instruction trace.
 
 Example:
 
-    $ ./Run_regression.py  ../RV64AIMSU_verilator/exe_HW_sim  ./isa  ./Logs  v1
+    $ ./Run_regression.py  isa ../RV64AIMSU_verilator/exe_HW_sim  ./isa  ./Logs  v1
 
 will run the verilator simulation executable on the all RISC-V ISA
 tests that match the following:

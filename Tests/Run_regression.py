@@ -5,10 +5,10 @@
 
 usage_line = (
     "  Usage:\n"
-    "    $ <this_prog>    <simulation_executable>  <repo_dir>  <logs_dir>  <arch>  <RAM base> <RAM size> <opt verbosity>  <opt parallelism>\n"
+    "    $ <this_prog>  <test type>  <simulation_executable>  <repo_dir>  <logs_dir>  <arch>  <RAM base> <RAM size> <opt verbosity>  <opt parallelism>\n"
     "\n"
     "  Runs the RISC-V <simulation_executable>\n"
-    "  on ISA tests: ELF files taken from <repo-dir>/isa and its sub-directories.\n"
+    "  on <test type> tests: ELF files taken from <repo-dir>/<test type> and its sub-directories.\n"
     "\n"
     "  Runs it only on those ELF files that are relevant to architecture <arch>.\n"
     "\n"
@@ -29,12 +29,12 @@ usage_line = (
     "      In any case, limits it to 8.\n"
     "\n"
     "  Example:\n"
-    "      $ <this_prog>  .exe_HW_sim  ~somebody/GitHub/Piccolo  ./Logs  RV32IMU  v1 4\n"
+    "      $ <this_prog>  isa .exe_HW_sim  ~somebody/GitHub/Piccolo  ./Logs  RV32IMU 'h8000_0000 'h1000_0000 v1 4\n"
     "    will run the verilator simulation executable on the following RISC-V ISA tests:\n"
     "            ~somebody/GitHub/Tests/isa/rv32ui-p*\n"
     "            ~somebody/GitHub/Tests/isa/rv32mi-p*\n"
     "            ~somebody/GitHub/Tests/isa/rv32um-p*\n"
-    "    which are relevant for architecture RV32IMU\n"
+    "    which are relevant for architecture RV32IMU, with a 256MB RAM at 0x80000000\n"
     "    and will leave a transcript of each test's simulation output in files like\n"
     "            ./Logs/rv32ui-p-add.log\n"
     "    Each log will contain an instruction trace (because of the 'v1' arg).\n"
@@ -70,22 +70,22 @@ def main (argv = None):
         return 0
 
     # Simulation executable
-    if not (os.path.exists (argv [1])):
+    if not (os.path.exists (argv [2])):
         sys.stderr.write ("ERROR: The given simulation path does not seem to exist?\n")
-        sys.stderr.write ("    Simulation path: " + sim_path + "\n")
+        sys.stderr.write ("    Simulation path: " + argv [2] + "\n")
         sys.exit (1)
-    args_dict = {'sim_path': os.path.abspath (os.path.normpath (argv [1]))}
+    args_dict = {'sim_path': os.path.abspath (os.path.normpath (argv [2]))}
 
     # Repo in which to find ELFs and elf_to_hex executable
-    if (not os.path.exists (argv [2])):
-        sys.stderr.write ("ERROR: repo directory ({0}) does not exist?\n".format (argv [2]))
+    if (not os.path.exists (argv [3])):
+        sys.stderr.write ("ERROR: repo directory ({0}) does not exist?\n".format (argv [3]))
         sys.stdout.write ("\n")
         sys.stdout.write (usage_line)
         sys.stdout.write ("\n")
         return 1
-    repo = os.path.abspath (os.path.normpath (argv [2]))
+    repo = os.path.abspath (os.path.normpath (argv [3]))
 
-    elfs_path = os.path.join (repo, "Tests", "isa")
+    elfs_path = os.path.join (repo, "Tests", argv[1])
     if (not os.path.exists (elfs_path)):
         sys.stderr.write ("ERROR: ELFs directory ({0}) does not exist?\n".format (elfs_path))
         sys.stdout.write ("\n")
@@ -95,14 +95,14 @@ def main (argv = None):
     args_dict ['elfs_path'] = elfs_path
 
     # Logs directory
-    logs_path = os.path.abspath (os.path.normpath (argv [3]))
+    logs_path = os.path.abspath (os.path.normpath (argv [4]))
     if not (os.path.exists (logs_path) and os.path.isdir (logs_path)):
         print ("Creating dir: " + logs_path)
         os.mkdir (logs_path)
     args_dict ['logs_path'] = logs_path
 
-    # Architecture string and implied ISA test families
-    arch_string = extract_arch_string (argv [4])
+    # Architecture string and implied test families
+    arch_string = extract_arch_string (argv [5])
     if (arch_string == None):
         sys.stderr.write ("ERROR: no architecture specified?\n")
         sys.stdout.write ("\n")
@@ -112,25 +112,25 @@ def main (argv = None):
     args_dict ['arch_string'] = arch_string
 
     # RAM parameters
-    args_dict ['ram_base'] = argv[5]
-    args_dict ['ram_size'] = argv[6]
+    args_dict ['ram_base'] = argv[6]
+    args_dict ['ram_size'] = argv[7]
 
     test_families = select_test_families (arch_string)
-    print ("Testing the following families of ISA tests")
+    print ("Testing the following families of tests")
     for tf in test_families:
         print ("    " + tf)
     args_dict ['test_families'] = test_families
 
     # Optional verbosity
     verbosity = 0
-    j = 5
-    if len (argv) >= 6:
-        if argv [5] == "v1":
+    j = 8
+    if len (argv) >= 9:
+        if argv [8] == "v1":
             verbosity = 1
-            j = 6
-        elif argv [5] == "v2":
+            j = 9
+        elif argv [8] == "v2":
             verbosity = 2
-            j = 6
+            j = 9
     args_dict ['verbosity'] = verbosity
 
     # Optional parallelism; limit it to 8
@@ -178,10 +178,10 @@ def main (argv = None):
     def fn_filter_dir (level, filename):
         return True
 
-    # Traverse the elfs_path and collect filenames of relevant isa tests
+    # Traverse the elfs_path and collect filenames of relevant tests
     filenames = traverse (fn_filter_dir, fn_filter_regular_file, 0, elfs_path)
     n_tests   = len (filenames)
-    sys.stdout.write ("{0} relevant isa tests found under {1}\n".format (n_tests, elfs_path))
+    sys.stdout.write ("{0} relevant tests found under {1}\n".format (n_tests, elfs_path))
     if n_tests == 0:
         return 0
     args_dict ['filenames'] = filenames
@@ -257,7 +257,7 @@ def extract_arch_string (s):
     return arch
 
 # ================================================================
-# Select ISA test families based on provided arch string
+# Select test families based on provided arch string
 
 def select_test_families (arch):
     arch = arch.lower ()
@@ -365,7 +365,7 @@ def do_worker (worker_num, args_dict):
             return
         filename = filenames [my_index]
 
-        (message, passed) = do_isa_test (args_dict, filename)
+        (message, passed) = do_elf_test (args_dict, filename)
         num_executed = num_executed + 1
 
         if passed:
@@ -387,7 +387,7 @@ def do_worker (worker_num, args_dict):
 # ================================================================
 # For each ELF file, execute it in the RISC-V simulator
 
-def do_isa_test (args_dict, full_filename):
+def do_elf_test (args_dict, full_filename):
     message = ""
 
     (dirname, basename) = os.path.split (full_filename)

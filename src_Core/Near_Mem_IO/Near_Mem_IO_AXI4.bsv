@@ -39,8 +39,11 @@ package Near_Mem_IO_AXI4;
 // ================================================================
 
 export  Near_Mem_IO_AXI4_IFC (..),
-        mkNear_Mem_IO_AXI4,
-        Clint_Wd_Addr, Clint_Wd_Data;
+        mkNear_Mem_IO_AXI4
+`ifdef NO_FABRIC_CLINT
+        ,Clint_Wd_Addr, Clint_Wd_Data
+`endif
+;
 
 // ================================================================
 // BSV library imports

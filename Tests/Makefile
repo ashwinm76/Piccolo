@@ -35,7 +35,7 @@ SIM_DIR = ../builds/$(ARCH)_$(SIM)
 .PHONY: test
 test:
 	@echo "Running regressions; saving logs in Logs/"
-	./Run_regression.py \
+	./Run_regression.py isa \
 		$(SIM_DIR)/exe_HW_sim \
 		./isa  ./Logs  $(OPTARCH)
 	@echo "Finished running regressions; saved logs in Logs/"

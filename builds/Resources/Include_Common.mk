@@ -102,7 +102,16 @@ test:
 .PHONY: isa_tests
 isa_tests:
 	@echo "Running regressions on ISA tests; saving logs in Logs/"
-	$(REPO)/Tests/Run_regression.py  ./exe_HW_sim  $(REPO)  ./Logs  $(ARCH) $(RAM_BASE) $(RAM_SIZE)
+	$(REPO)/Tests/Run_regression.py  isa ./exe_HW_sim  $(REPO)  ./Logs  $(ARCH) $(RAM_BASE) $(RAM_SIZE)
+	@echo "Finished running regressions; saved logs in Logs/"
+
+# ================================================================
+# Functional Regression testing
+
+.PHONY: func_tests
+func_tests:
+	@echo "Running regressions on functional tests; saving logs in Logs/"
+	$(REPO)/Tests/Run_regression.py  func ./exe_HW_sim  $(REPO)  ./Logs  $(ARCH) $(RAM_BASE) $(RAM_SIZE)
 	@echo "Finished running regressions; saved logs in Logs/"
 
 # ================================================================
