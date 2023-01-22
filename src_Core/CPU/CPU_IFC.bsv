@@ -22,6 +22,12 @@ import AXI4_Lite_Types :: *;
 
 `ifdef NO_FABRIC_PLIC
 import Near_Reg_IFC :: *;
+import PLIC         :: *;
+`endif
+
+`ifdef NO_FABRIC_CLINT
+import Near_Reg_IFC :: *;
+import Near_Mem_IO_AXI4 :: *;
 `endif
 
 `ifdef INCLUDE_GDB_CONTROL
@@ -58,7 +64,13 @@ interface CPU_IFC;
     // ----------------
     // PLIC
 `ifdef NO_FABRIC_PLIC
-  interface Near_Reg_Master_IFC plic;
+    interface Near_Reg_Master_IFC#(Plic_Wd_Addr, Plic_Wd_Data) plic;
+`endif
+
+    // ----------------
+    // CLINT
+`ifdef NO_FABRIC_CLINT
+    interface Near_Reg_Master_IFC#(Clint_Wd_Addr, Clint_Wd_Data) clint;
 `endif
 
    // ----------------

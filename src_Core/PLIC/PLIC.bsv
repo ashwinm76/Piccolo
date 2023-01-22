@@ -31,6 +31,8 @@ import  Semi_FIFOF :: *;
 `ifdef NO_FABRIC_PLIC
 // Near peripheral access interfaces
 import Near_Reg_IFC :: *;
+typedef 32 Plic_Wd_Addr;
+typedef 32 Plic_Wd_Data;
 `else
 import AXI4_Types   :: *;
 import AXI4_Fabric  :: *;
@@ -90,7 +92,7 @@ interface PLIC_IFC#(numeric type t_n_external_sources, numeric type t_n_targets,
 
   // Memory-mapped access
 `ifdef NO_FABRIC_PLIC
-  interface Near_Reg_Slave_IFC reg_access;
+  interface Near_Reg_Slave_IFC#(Plic_Wd_Addr, Plic_Wd_Data) reg_access;
 `else
   interface AXI4_Slave_IFC#(Wd_Id, Wd_Addr, Wd_Data, Wd_User) axi4_slave;
 `endif
@@ -138,10 +140,10 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
   Reg#(Bit#(64)) rg_addr_base <- mkRegU;
 
 `ifdef NO_FABRIC_PLIC
-  FIFOF#(Near_Reg_Rd_Req) f_Near_Reg_Rd_Req <- mkFIFOF;
-  FIFOF#(Near_Reg_Rd_Resp) f_Near_Reg_Rd_Resp <- mkFIFOF;
-  FIFOF#(Near_Reg_Wr_Req) f_Near_Reg_Wr_Req <- mkFIFOF;
-  FIFOF#(Near_Reg_Wr_Resp) f_Near_Reg_Wr_Resp <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Req#(Plic_Wd_Addr)) f_near_reg_rd_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Resp#(Plic_Wd_Data)) f_near_reg_rd_resp <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Req#(Plic_Wd_Addr, Plic_Wd_Data)) f_near_reg_wr_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Resp) f_near_reg_wr_resp <- mkFIFOF;
   let resp_okay = RESP_OK;
   let resp_decerr = RESP_DECERR;
   let resp_slverr = RESP_ERR;
@@ -257,6 +259,11 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
 
 `ifndef NO_FABRIC_PLIC
     slave_xactor.reset;
+`else
+    f_near_reg_rd_req.clear;
+    f_near_reg_rd_resp.clear;
+    f_near_reg_wr_req.clear;
+    f_near_reg_wr_resp.clear;
 `endif
     f_reset_rsps.enq(?);
   endrule
@@ -271,12 +278,12 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
 
   rule rl_process_rd_req(!f_reset_reqs.notEmpty
 `ifdef NO_FABRIC_PLIC
-      && f_Near_Reg_Rd_Req.notEmpty
+      && f_near_reg_rd_req.notEmpty
 `endif
   );
 `ifdef NO_FABRIC_PLIC
-    let rda = f_Near_Reg_Rd_Req.first;
-    f_Near_Reg_Rd_Req.deq;
+    let rda = f_near_reg_rd_req.first;
+    f_near_reg_rd_req.deq;
 `else
     let rda <- pop_o(slave_xactor.o_rd_addr);
 `endif
@@ -402,7 +409,7 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
     let rdr = Near_Reg_Rd_Resp {
       rresp: rresp,
       rdata: rdata};
-    f_Near_Reg_Rd_Resp.enq(rdr);
+    f_near_reg_rd_resp.enq(rdr);
 `else
     Bit#(64) rd = zeroExtend(rdata);
     if ((valueOf(Wd_Data) == 64) && ((addr_offset & 'h7) == 'h4))
@@ -432,12 +439,12 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
 
   rule rl_process_wr_req(!f_reset_reqs.notEmpty
 `ifdef NO_FABRIC_PLIC
-      && f_Near_Reg_Wr_Req.notEmpty
+      && f_near_reg_wr_req.notEmpty
 `endif
   );
 `ifdef NO_FABRIC_PLIC
-    let wra = f_Near_Reg_Wr_Req.first;
-    f_Near_Reg_Wr_Req.deq;
+    let wra = f_near_reg_wr_req.first;
+    f_near_reg_wr_req.deq;
     let wrd = wra.wdata;
 `else
     let wra <- pop_o(slave_xactor.o_wr_addr);
@@ -564,7 +571,7 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
     // Send write-response to bus
 `ifdef NO_FABRIC_PLIC
     let wrr = Near_Reg_Wr_Resp { bresp: bresp };
-    f_Near_Reg_Wr_Resp.enq(wrr);
+    f_near_reg_wr_resp.enq(wrr);
 `else
     let wrr = AXI4_Wr_Resp {
         bid: wra.awid,
@@ -649,8 +656,8 @@ module mkPLIC (PLIC_IFC#(t_n_external_sources, t_n_targets, t_max_priority))
   // Memory-mapped access
 `ifdef NO_FABRIC_PLIC
   interface Near_Reg_Slave_IFC reg_access;
-    interface reg_rd = toGPServer(f_Near_Reg_Rd_Req, f_Near_Reg_Rd_Resp);
-    interface reg_wr = toGPServer(f_Near_Reg_Wr_Req, f_Near_Reg_Wr_Resp);
+    interface reg_rd = toGPServer(f_near_reg_rd_req, f_near_reg_rd_resp);
+    interface reg_wr = toGPServer(f_near_reg_wr_req, f_near_reg_wr_resp);
   endinterface
 `else
   interface axi4_slave = slave_xactor.axi_side;

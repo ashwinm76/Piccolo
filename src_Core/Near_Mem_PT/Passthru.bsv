@@ -28,6 +28,12 @@ import Fabric_Defs  :: *;
 
 `ifdef NO_FABRIC_PLIC
 import Near_Reg_IFC :: *;
+import PLIC         :: *;
+`endif
+
+`ifdef NO_FABRIC_CLINT
+import Near_Reg_IFC :: *;
+import Near_Mem_IO_AXI4 :: *;
 `endif
 
 // ================================================================
@@ -77,9 +83,16 @@ interface Passthru_IFC;
   interface Client#(Bit#(32), Bit#(32)) boot_rom;
 `endif
 
+// TODO: this should only be on the DMEM
 `ifdef NO_FABRIC_PLIC
   // PLIC near interface
-  interface Near_Reg_Master_IFC plic_reg_access;
+  interface Near_Reg_Master_IFC#(Plic_Wd_Addr, Plic_Wd_Data) plic_reg_access;
+`endif
+
+// TODO: this should only be on the DMEM
+`ifdef NO_FABRIC_CLINT
+  // CLINT near interface
+  interface Near_Reg_Master_IFC#(Clint_Wd_Addr, Clint_Wd_Data) clint_reg_access;
 `endif
 endinterface
 
@@ -280,11 +293,20 @@ module mkPassthru#(parameter Bool dmem_not_imem)(Passthru_IFC);
   FIFOF#(Bit#(32)) f_boot_rom_resp <- mkFIFOF;
 `endif
 
+// TODO: this should only be on the DMEM
 `ifdef NO_FABRIC_PLIC
-  FIFOF#(Near_Reg_Rd_Req) f_plic_rd_req <- mkFIFOF;
-  FIFOF#(Near_Reg_Rd_Resp) f_plic_rd_resp <- mkFIFOF;
-  FIFOF#(Near_Reg_Wr_Req) f_plic_wr_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Req#(Plic_Wd_Addr)) f_plic_rd_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Resp#(Plic_Wd_Data)) f_plic_rd_resp <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Req#(Plic_Wd_Addr, Plic_Wd_Data)) f_plic_wr_req <- mkFIFOF;
   FIFOF#(Near_Reg_Wr_Resp) f_plic_wr_resp <- mkFIFOF;
+`endif
+
+// TODO: this should only be on the DMEM
+`ifdef NO_FABRIC_CLINT
+  FIFOF#(Near_Reg_Rd_Req#(Clint_Wd_Addr)) f_clint_rd_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Rd_Resp#(Clint_Wd_Data)) f_clint_rd_resp <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Req#(Clint_Wd_Addr, Clint_Wd_Data)) f_clint_wr_req <- mkFIFOF;
+  FIFOF#(Near_Reg_Wr_Resp) f_clint_wr_resp <- mkFIFOF;
 `endif
 
 `ifdef ISA_A
@@ -701,6 +723,9 @@ function Bool fn_is_fabric_req;
 `ifdef NO_FABRIC_PLIC
   ret = ret && !soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr));
 `endif
+`ifdef NO_FABRIC_CLINT
+  ret = ret && !soc_map.m_is_near_mem_IO_addr(fn_PA_to_Fabric_Addr(rg_addr));
+`endif
   return ret;
 endfunction
 
@@ -716,6 +741,9 @@ function Bool fn_is_io_rd_resp_pending;
   Bool ret = False;
 `ifdef NO_FABRIC_PLIC
   ret = ret || f_plic_rd_resp.notEmpty;
+`endif
+`ifdef NO_FABRIC_CLINT
+  ret = ret || f_clint_rd_resp.notEmpty;
 `endif
   return ret;
 endfunction
@@ -799,8 +827,20 @@ endfunction
     end
     else begin
 `endif
-    Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
-    fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_CLINT
+      if (soc_map.m_is_near_mem_IO_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+        f_clint_rd_req.enq(Near_Reg_Rd_Req { araddr: zeroExtend(rg_addr) });
+        if (cfg_verbosity > 1)
+          $display ("%0d: %s.rl_io_read_req: CLINT RD: %0h", cur_cycle,
+              d_or_i, rg_addr);
+      end
+      else begin
+`endif
+        Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
+        fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_CLINT
+      end
+`endif
 `ifdef NO_FABRIC_PLIC
     end
 `endif
@@ -834,13 +874,29 @@ endfunction
     end
     else begin
 `endif
-      let rd_data <- pop_o(master_xactor.o_rd_data);
-      rdata = rd_data.rdata;
-      resp_ok = rd_data.rresp == axi4_resp_okay;
-      if (cfg_verbosity > 1) begin
-        $display ("%0d: %s.rl_io_read_rsp: paddr 0x%0h", cur_cycle, d_or_i, rg_addr);
-        $display ("    ", fshow(rd_data));
+`ifdef NO_FABRIC_CLINT
+      if (f_clint_rd_resp.notEmpty) begin
+        let rd_data = f_clint_rd_resp.first;
+        f_clint_rd_resp.deq;
+        rdata = rd_data.rdata;
+        resp_ok = rd_data.rresp == RESP_OK;
+        if (cfg_verbosity > 2) begin
+          $display("%0d: %s.rl_io_read_rsp: CLINT RD", cur_cycle, d_or_i);
+          $display("        ", fshow(rd_data));
+        end
       end
+      else begin
+`endif
+        let rd_data <- pop_o(master_xactor.o_rd_data);
+        rdata = rd_data.rdata;
+        resp_ok = rd_data.rresp == axi4_resp_okay;
+        if (cfg_verbosity > 1) begin
+          $display ("%0d: %s.rl_io_read_rsp: paddr 0x%0h", cur_cycle, d_or_i, rg_addr);
+          $display ("    ", fshow(rd_data));
+        end
+`ifdef NO_FABRIC_CLINT
+      end
+`endif
 `ifdef NO_FABRIC_PLIC
     end
 `endif
@@ -891,11 +947,27 @@ endfunction
     if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr)))
       f_plic_wr_req.enq(Near_Reg_Wr_Req{
         awaddr: rg_addr, 
-        wdata: truncate(rg_st_amo_val)
+        wdata: truncate(rg_st_amo_val),
+        wstrb: 0
       });
     else
 `endif
-      fa_fabric_send_write_req(rg_f3, rg_addr, rg_st_amo_val);
+`ifdef NO_FABRIC_CLINT
+      if (soc_map.m_is_near_mem_IO_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+        // TODO: use a function specific to near_rg_ifc here
+        match {
+            .waddr,
+            .wdata,
+            .wstrb,
+            .wsize } = fn_to_fabric_write_fields(rg_f3, rg_addr, rg_st_amo_val);
+        f_clint_wr_req.enq(Near_Reg_Wr_Req{
+          awaddr: zeroExtend(waddr), 
+          wdata: truncate(wdata),
+          wstrb: wstrb
+        });
+      end else
+`endif
+        fa_fabric_send_write_req(rg_f3, rg_addr, rg_st_amo_val);
 
     rg_state <= MEM_ST_AMO_RSP;
     if (cfg_verbosity > 1)
@@ -937,8 +1009,18 @@ endfunction
       });
     else begin
 `endif
-      Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
-      fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_CLINT
+      if (soc_map.m_is_near_mem_IO_addr(fn_PA_to_Fabric_Addr(rg_addr)))
+        f_clint_rd_req.enq(Near_Reg_Rd_Req{
+          araddr: rg_addr
+        });
+      else begin
+`endif
+        Fabric_Addr fabric_addr = fn_PA_to_Fabric_Addr(rg_addr);
+        fa_fabric_send_read_req(fabric_addr, fn_funct3_to_AXI4_Size(rg_f3));
+`ifdef NO_FABRIC_CLINT
+      end
+``endif
 `ifdef NO_FABRIC_PLIC
     end
 ``endif
@@ -970,14 +1052,30 @@ endfunction
     end
     else begin
 `endif
-    let rd_data <- pop_o(master_xactor.o_rd_data);
-    rdata = rd_data.rdata;
-    resp_ok = rd_data.rresp == axi4_resp_okay;
-    if (cfg_verbosity > 1) begin
-      $display("%0d: %s.rl_io_AMO_read_rsp: paddr 0x%0h", cur_cycle, d_or_i,
-          rg_addr);
-      $display ("    ", fshow(rd_data));
-    end
+`ifdef NO_FABRIC_CLINT
+      if (f_clint_rd_resp.notEmpty) begin
+        let rd_data = f_clint_rd_resp.first;
+        f_clint_rd_resp.deq;
+        rdata = rd_data.rdata;
+        resp_ok = rd_data.rresp == RESP_OK;
+        if (cfg_verbosity > 2) begin
+          $display("%0d: %s.rl_io_AMO_read_rsp: CLINT RD", cur_cycle, d_or_i);
+          $display("        ", fshow(rd_data));
+        end
+      end
+      else begin
+`endif
+      let rd_data <- pop_o(master_xactor.o_rd_data);
+      rdata = rd_data.rdata;
+      resp_ok = rd_data.rresp == axi4_resp_okay;
+      if (cfg_verbosity > 1) begin
+        $display("%0d: %s.rl_io_AMO_read_rsp: paddr 0x%0h", cur_cycle, d_or_i,
+            rg_addr);
+        $display ("    ", fshow(rd_data));
+      end
+`ifdef NO_FABRIC_CLINT
+      end
+`endif      
 `ifdef NO_FABRIC_PLIC
     end
 `endif
@@ -1006,12 +1104,28 @@ endfunction
       if (soc_map.m_is_plic_addr(fn_PA_to_Fabric_Addr(rg_addr)))
         f_plic_wr_req.enq(Near_Reg_Wr_Req{
           awaddr: rg_addr, 
-          wdata: truncate(new_st_val)
+          wdata: truncate(new_st_val),
+          wstrb: 0
         });
       else
 `endif
-        // Write back new st_val to fabric
-        fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
+`ifdef NO_FABRIC_CLINT
+        if (soc_map.m_is_near_mem_IO_addr(fn_PA_to_Fabric_Addr(rg_addr))) begin
+          // TODO: use a function specific to near_rg_ifc here
+          match {
+              .waddr,
+              .wdata,
+              .wstrb,
+              .wsize } = fn_to_fabric_write_fields(rg_f3, rg_addr, new_st_val);
+          f_clint_wr_req.enq(Near_Reg_Wr_Req{
+            awaddr: zeroExtend(waddr), 
+            wdata: truncate(wdata),
+            wstrb: wstrb
+          });
+        end else
+`endif
+          // Write back new st_val to fabric
+          fa_fabric_send_write_req(rg_f3, rg_addr, new_st_val);
 
       fa_drive_IO_read_rsp(rg_f3, rg_addr, new_ld_val);
       rg_ld_val <= new_ld_val;
@@ -1043,7 +1157,7 @@ endfunction
       // TODO: need to raise a non-maskable interrupt (NMI) here
       $display ("%0d: %s.rl_discard_write_rsp: fabric response error: exit",
           cur_cycle, d_or_i);
-      $display ("    ", fshow (wr_resp));
+      $display ("    ", fshow(wr_resp));
     end
     else if (cfg_verbosity > 1) begin
       $display ("%0d: %s.rl_discard_write_rsp: pending %0d ",
@@ -1063,7 +1177,24 @@ endfunction
       // TODO: need to raise a non-maskable interrupt (NMI) here
       $display("%0d: %s.discard_plic_wr_resp: PLIC response error: exit",
           cur_cycle, d_or_i);
-      $display("    ", fshow (wresp));
+      $display("    ", fshow(wresp));
+    end
+  endrule
+`endif
+
+`ifdef NO_FABRIC_CLINT
+  // Discard CLINT write responses
+  rule discard_clint_wr_resp(f_clint_wr_resp.notEmpty);
+    let wresp = f_clint_wr_resp.first;
+    f_clint_wr_resp.deq;
+
+    // TODO: do we need credit counters for CLINT, like for the fabric?
+
+    if (wresp.bresp != RESP_OK) begin
+      // TODO: need to raise a non-maskable interrupt (NMI) here
+      $display("%0d: %s.discard_plic_wr_resp: CLINT response error: exit",
+          cur_cycle, d_or_i);
+      $display("    ", fshow(wresp));
     end
   endrule
 `endif
@@ -1182,6 +1313,14 @@ endfunction
   interface Near_Reg_Master_IFC plic_reg_access;
     interface reg_rd = toGPClient(f_plic_rd_req, f_plic_rd_resp);
     interface reg_wr = toGPClient(f_plic_wr_req, f_plic_wr_resp);
+  endinterface
+`endif
+
+`ifdef NO_FABRIC_CLINT
+  // CLINT master interface
+  interface Near_Reg_Master_IFC clint_reg_access;
+    interface reg_rd = toGPClient(f_clint_rd_req, f_clint_rd_resp);
+    interface reg_wr = toGPClient(f_clint_wr_req, f_clint_wr_resp);
   endinterface
 `endif
 endmodule

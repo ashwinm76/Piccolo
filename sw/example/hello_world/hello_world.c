@@ -20,6 +20,11 @@
 #define PLIC_CLCM_T0_OFFS (0x00200004/4)
 #define PLIC_CLCMBLK_SIZE (0x1000/4)
 
+/* CLINT parameters */
+#define MTIMECMP_BASE ((volatile uint32_t*)0x02004000)
+#define MTIME_BASE ((volatile uint32_t*)0x0200BFF8)
+#define MSIP_BASE ((volatile uint32_t*)0x02000000)
+
 typedef struct __attribute__((packed,aligned(4))) {
   uint32_t CTRL;
   uint32_t DATA;
@@ -275,6 +280,44 @@ static void __uart_touppercase(uint32_t len, char *ptr) {
   }
 }
 
+void clint_test() {
+  uint32_t d;
+  (void)d;
+
+  // Read MTIME
+  for(int i=0; i<5; i++) {
+    d = *(MTIME_BASE);
+    uart_printf("MTIME=%d\n", d);
+  }
+  
+  // Write MTIME
+  *(MTIME_BASE) = 0;
+
+  // Read MTIME
+  for(int i=0; i<5; i++) {
+    d = *(MTIME_BASE);
+    uart_printf("MTIME=%d\n", d);
+  }
+
+  // Read MTIMECMP
+  d = *(MTIMECMP_BASE);
+  uart_printf("MTIMECMP=0x%x\n", d);
+  // Write MTIMECMP
+  *(MTIMECMP_BASE) = 0xdeadbeef;
+  // Read MTIMECMP
+  d = *(MTIMECMP_BASE);
+  uart_printf("MTIMECMP=0x%x\n", d);
+
+  // Read MSIP
+  d = *(MSIP_BASE);
+  uart_printf("MSIP=%d\n", d);
+  // Write MSIP
+  *(MSIP_BASE) = 1;
+  // Read MSIP
+  d = *(MSIP_BASE);
+  uart_printf("MSIP=%d\n", d);
+}
+
 void plic_test() {
   uint32_t d;
   (void)d;
@@ -339,6 +382,9 @@ int main() {
   char* c = msg;
 
   uart_init(57600, PARITY_NONE, FLOW_CONTROL_NONE);
+
+  // exercise the CLINT
+  clint_test();
 
   // exercise PLIC
   plic_test();

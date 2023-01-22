@@ -1654,6 +1654,12 @@ module mkCPU (CPU_IFC);
     interface plic = near_mem.plic;
 `endif
 
+    // ----------------
+    // CLINT
+`ifdef NO_FABRIC_CLINT
+    interface clint = near_mem.clint;
+`endif
+
    // ----------------
    // External interrupts
 

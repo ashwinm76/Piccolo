@@ -35,6 +35,10 @@ import Boot_ROM     :: *;
 import Near_Reg_IFC :: *;
 `endif
 
+`ifdef NO_FABRIC_CLINT
+import Near_Mem_IO_AXI4 :: *;
+`endif
+
 // System address map and pc_reset value
 import SoC_Map :: *;
 
@@ -229,6 +233,12 @@ module mkNear_Mem(Near_Mem_IFC);
   // PLIC
 `ifdef NO_FABRIC_PLIC
   interface plic = dmem_pt.plic_reg_access;
+`endif
+
+  // ---------------
+  // CLINT
+`ifdef NO_FABRIC_CLINT
+  interface clint = dmem_pt.clint_reg_access;
 `endif
 
 endmodule
